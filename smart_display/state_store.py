@@ -54,10 +54,29 @@ class StateStore:
         stale_after_seconds: int,
         source: str,
     ) -> None:
+        """Record a provider fetch failure.
+
+        Status transitions (Plan B4):
+          ``ok``    → ``stale`` (first failure after known-good data)
+          ``stale`` → ``error``
+          ``error`` → ``error``
+          ``empty`` → ``empty`` (no prior data — the UI keeps showing "Leer"
+                       rather than flipping to "Fehler" the moment a not-yet-
+                       configured provider is first polled)
+
+        In every case the error message and source are refreshed so ops and
+        the /health endpoint can see the latest attempt.
+        """
         with self._lock:
             section = getattr(self._state, section_name)
             previous_status = section.snapshot.status
-            section.snapshot.status = "stale" if previous_status == "ok" else "error"
+            if previous_status == "empty":
+                next_status = "empty"
+            elif previous_status == "ok":
+                next_status = "stale"
+            else:
+                next_status = "error"
+            section.snapshot.status = next_status
             section.snapshot.error_message = error_message
             section.snapshot.stale_after_seconds = stale_after_seconds
             section.snapshot.source = source
