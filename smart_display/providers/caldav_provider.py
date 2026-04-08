@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import unicodedata
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -7,6 +9,17 @@ from smart_display.config import AppConfig
 from smart_display.models import CalendarDaySection, CalendarEventItem, CalendarState
 from smart_display.providers.base import BaseProvider
 from smart_display.state_store import StateStore
+
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_calendar_name(value: str) -> str:
+    """Plan B12: normalise display names so case / whitespace / unicode
+    quirks don't cause silent filter mismatches. Casefold + NFKC + strip."""
+    if value is None:
+        return ""
+    return unicodedata.normalize("NFKC", str(value)).strip().casefold()
 
 
 def today_window(
@@ -206,6 +219,38 @@ class CalDAVProvider(BaseProvider):
         self.state_store.update_section(self.section_name, state)
 
 
+def _calendar_identity_candidates(calendar) -> list[str]:
+    """Return every name-ish value we can extract from a caldav calendar.
+
+    Priority (most specific first): ``.name``, a ``displayname`` property
+    if the server exposed one, then the basename of the calendar URL. All
+    candidates are normalised before comparison (Plan B12)."""
+    candidates: list[str] = []
+    name_attr = getattr(calendar, "name", None)
+    if name_attr:
+        candidates.append(str(name_attr))
+
+    props_getter = getattr(calendar, "get_properties", None)
+    if callable(props_getter):
+        try:
+            from caldav.elements import dav  # type: ignore
+            props = props_getter([dav.DisplayName()])
+        except Exception:  # pragma: no cover — props are optional
+            props = None
+        if props:
+            for value in props.values():
+                if value:
+                    candidates.append(str(value))
+
+    url_value = getattr(calendar, "url", None)
+    if url_value:
+        basename = str(url_value).rstrip("/").rsplit("/", 1)[-1]
+        if basename:
+            candidates.append(basename)
+
+    return candidates
+
+
 def _collect_calendar_items(
     *,
     calendars: list,
@@ -215,16 +260,24 @@ def _collect_calendar_items(
     selected_names: list[str],
     calendar_parser,
 ) -> list[CalendarEventItem]:
-    selected = {name.strip() for name in selected_names if name.strip()}
+    selected = {
+        normalize_calendar_name(name)
+        for name in selected_names
+        if normalize_calendar_name(name)
+    }
     results: list[CalendarEventItem] = []
     seen: set[tuple[str, str]] = set()
+    matched_calendars = 0
+    available_names: list[str] = []
 
     for calendar in calendars:
-        display_name = getattr(calendar, "name", "") or getattr(
-            calendar, "url", "calendar"
-        )
-        if selected and str(display_name) not in selected:
-            continue
+        candidates = _calendar_identity_candidates(calendar) or ["calendar"]
+        available_names.extend(candidates)
+        if selected:
+            normalised = {normalize_calendar_name(c) for c in candidates}
+            if not (normalised & selected):
+                continue
+        matched_calendars += 1
 
         for event in calendar.date_search(start=start, end=end, expand=True):
             ical = getattr(event, "icalendar_instance", None)
@@ -254,4 +307,29 @@ def _collect_calendar_items(
                 if start <= event_start < end:
                     results.append(item)
 
+    if selected and matched_calendars == 0:
+        _warn_on_empty_name_match(selected_names, available_names)
+
     return sorted(results, key=lambda item: (item.starts_at, item.title.lower()))
+
+
+_warned_name_mismatches: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
+
+
+def _warn_on_empty_name_match(
+    selected_names: list[str], available_names: list[str]
+) -> None:
+    """Log once per unique (wanted, available) combination — per-tick spam
+    would drown the Pi journal."""
+    key = (
+        tuple(sorted(selected_names)),
+        tuple(sorted(set(available_names))),
+    )
+    if key in _warned_name_mismatches:
+        return
+    _warned_name_mismatches.add(key)
+    logger.warning(
+        "calendar filter %r matched no calendars; available names: %r",
+        selected_names,
+        sorted(set(available_names)),
+    )
