@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import random
 from pathlib import Path
 from typing import Callable
@@ -10,6 +11,9 @@ from urllib import request as urllib_request
 
 from smart_display.cache.disk_cache import DiskCache
 from smart_display.models import PhotoManifestEntry
+
+
+logger = logging.getLogger(__name__)
 
 
 try:
@@ -110,13 +114,39 @@ class ImageCache:
         return None
 
     def _load_manifest(self) -> list[PhotoManifestEntry]:
-        raw = self.manifest_cache.load() or []
-        entries = [
-            PhotoManifestEntry.from_dict(item)
-            for item in raw
-            if Path(str(item.get("local_path", ""))).exists()
-        ]
-        if len(entries) != len(raw):
+        # DiskCache.load() already quarantines unparseable JSON (Plan S2).
+        # Here we additionally defend against per-entry schema drift — a
+        # single malformed record must not poison the whole manifest.
+        raw = self.manifest_cache.load()
+        if not isinstance(raw, list):
+            if raw is not None:
+                logger.warning(
+                    "image manifest at %s has unexpected shape (%s) — resetting",
+                    self.manifest_cache.path,
+                    type(raw).__name__,
+                )
+                self.manifest_cache.save([])
+            return []
+
+        entries: list[PhotoManifestEntry] = []
+        skipped = 0
+        for item in raw:
+            if not isinstance(item, dict):
+                skipped += 1
+                continue
+            local_path_value = str(item.get("local_path", ""))
+            if not local_path_value or not Path(local_path_value).exists():
+                skipped += 1
+                continue
+            try:
+                entries.append(PhotoManifestEntry.from_dict(item))
+            except (KeyError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "image manifest entry dropped (%s): %s", exc, item
+                )
+                skipped += 1
+
+        if skipped:
             self.manifest_cache.save([entry.to_dict() for entry in entries])
         return entries
 
