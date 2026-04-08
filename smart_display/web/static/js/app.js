@@ -7,6 +7,23 @@
   let pollTimer = null;
   let slideshowTimer = null;
   let resizeTimer = null;
+  let midnightTimer = null;
+
+  // Cached Intl formatters. Re-creating them per tick burns measurable CPU
+  // on a Pi Zero 2 W; see plan B5. The weekday formatter drives the client-
+  // side day label computation (mirrors smart_display/calendar_layout.py).
+  const LOCALE = config.locale || "de-AT";
+  const TIMEZONE = config.timezone || "Europe/Vienna";
+  const WEEKDAY_FMT = new Intl.DateTimeFormat(LOCALE, {
+    weekday: "long",
+    timeZone: TIMEZONE,
+  });
+  const SECTION_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: TIMEZONE,
+  });
 
   const nodes = {
     time: document.getElementById("clock-time"),
@@ -40,8 +57,54 @@
     screensaverImage: document.getElementById("screensaver-image"),
     screensaverFallback: document.getElementById("screensaver-fallback"),
     screensaverClock: document.getElementById("screensaver-clock"),
+    toast: document.getElementById("toast"),
   };
   let volumeCommitTimer = null;
+  // Volume-Slider Race-Guard (Plan A2). Snapshots arriving while the user is
+  // mid-drag or within 1.5 s of the last touch must not snap the slider back.
+  let volumeBusyUntil = 0;
+  let volumeLastSent = null;
+  const VOLUME_BUSY_MS = 1500;
+  const VOLUME_TOLERANCE = 2;
+
+  function markVolumeBusy() {
+    volumeBusyUntil = performance.now() + VOLUME_BUSY_MS;
+    if (nodes.spotifyVolume) {
+      nodes.spotifyVolume.dataset.dirty = "1";
+    }
+  }
+
+  let toastTimer = null;
+  function showToast(message, kind = "error", ms = 4000) {
+    const node = nodes.toast;
+    if (!node || !message) {
+      return;
+    }
+    window.clearTimeout(toastTimer);
+    node.textContent = message;
+    node.dataset.kind = kind;
+    node.hidden = false;
+    // Force reflow so the transition re-plays when replacing an existing toast.
+    // eslint-disable-next-line no-unused-expressions
+    node.offsetHeight;
+    node.classList.add("is-visible");
+    toastTimer = window.setTimeout(() => hideToast(), ms);
+  }
+
+  function hideToast() {
+    const node = nodes.toast;
+    if (!node) {
+      return;
+    }
+    window.clearTimeout(toastTimer);
+    node.classList.remove("is-visible");
+    // Wait for the fade-out before hiding so the screen reader doesn't announce empty.
+    window.setTimeout(() => {
+      if (!node.classList.contains("is-visible")) {
+        node.hidden = true;
+      }
+    }, 220);
+  }
 
   const icons = {
     clear:
@@ -227,25 +290,48 @@
     return sectionLabel;
   }
 
+  function todayIsoInZone() {
+    // en-CA locale gives us YYYY-MM-DD directly, honoring the configured timezone.
+    return SECTION_DATE_FMT.format(new Date());
+  }
+
+  function computeDayLabel(sectionDateIso, todayIso) {
+    if (!sectionDateIso) {
+      return "";
+    }
+    const sectionParts = sectionDateIso.split("-").map((part) => Number(part));
+    const todayParts = todayIso.split("-").map((part) => Number(part));
+    if (sectionParts.length !== 3 || todayParts.length !== 3) {
+      return "";
+    }
+    const sectionDate = Date.UTC(sectionParts[0], sectionParts[1] - 1, sectionParts[2]);
+    const today = Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2]);
+    const diffDays = Math.round((sectionDate - today) / 86_400_000);
+    if (diffDays === 0) {
+      return "Heute";
+    }
+    if (diffDays === 1) {
+      return "Morgen";
+    }
+    if (diffDays === 2) {
+      return "Übermorgen";
+    }
+    // Fall through to weekday name — covers future days > 2 and stale/offline past dates.
+    // Use UTC noon so the Intl formatter lands on the right weekday regardless of TZ.
+    const display = new Date(sectionDate + 12 * 3_600_000);
+    const label = WEEKDAY_FMT.format(display);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
   function normalizeCalendarSections(calendar) {
     const sections = Array.isArray(calendar.sections) ? calendar.sections : [];
-    const normalized = sections
+    return sections
       .filter((section) => Array.isArray(section.items) && section.items.length > 0)
       .map((section) => ({
         day_key: section.day_key || "",
-        day_label: section.day_label || "",
+        section_date: section.section_date || "",
         items: section.items,
       }));
-
-    if (normalized.length > 0) {
-      return normalized;
-    }
-
-    if (Array.isArray(calendar.items) && calendar.items.length > 0) {
-      return [{ day_key: "today", day_label: "Heute", items: calendar.items }];
-    }
-
-    return [];
   }
 
   function renderCalendar(calendar) {
@@ -254,6 +340,7 @@
     const availableHeight = nodes.calendarList.clientHeight;
     const canMeasure = availableHeight > 0;
     let visibleRows = 0;
+    const todayIso = todayIsoInZone();
     setStatus(nodes.calendarStatus, snapshot);
     nodes.calendarList.innerHTML = "";
 
@@ -269,12 +356,14 @@
     }
 
     outer: for (const section of sections) {
-      const needsLabel = section.day_key !== "today";
+      const dayLabel = computeDayLabel(section.section_date, todayIso);
+      const isToday = dayLabel === "Heute";
+      const needsLabel = !isToday && dayLabel.length > 0;
       let labelNode = null;
       let sectionHasVisibleItems = false;
 
       if (needsLabel) {
-        labelNode = createCalendarSectionLabel(section.day_label);
+        labelNode = createCalendarSectionLabel(dayLabel);
         nodes.calendarList.appendChild(labelNode);
       }
 
@@ -346,11 +435,40 @@
     nodes.spotifyToggle.disabled = disabled;
     nodes.spotifyNext.disabled = disabled;
     nodes.spotifyVolume.disabled = !spotify.supports_volume;
-    if (typeof spotify.volume_percent === "number") {
-      nodes.spotifyVolume.value = String(spotify.volume_percent);
-    } else if (!nodes.spotifyVolume.matches(":active")) {
-      nodes.spotifyVolume.value = "0";
+
+    // Plan A2: don't snap the slider back while the user is mid-drag or while
+    // the last user-sent value is still in flight. Spotify rounds volumes to
+    // the nearest step, so we accept a ±VOLUME_TOLERANCE reconciliation.
+    const slider = nodes.spotifyVolume;
+    const now = performance.now();
+    const incoming = typeof spotify.volume_percent === "number" ? spotify.volume_percent : null;
+    const busy = volumeBusyUntil > now;
+    const dirty = slider.dataset.dirty === "1";
+
+    if (incoming === null) {
+      if (!dirty && !busy && !slider.matches(":active")) {
+        slider.value = "0";
+        nodes.spotifyVolumeReadout.textContent = "";
+      }
+      return;
     }
+
+    if (busy) {
+      return;
+    }
+
+    if (dirty) {
+      if (volumeLastSent !== null && Math.abs(incoming - volumeLastSent) <= VOLUME_TOLERANCE) {
+        delete slider.dataset.dirty;
+        volumeLastSent = null;
+        slider.value = String(incoming);
+        nodes.spotifyVolumeReadout.textContent = `${incoming}%`;
+      }
+      return;
+    }
+
+    slider.value = String(incoming);
+    nodes.spotifyVolumeReadout.textContent = `${incoming}%`;
   }
 
   function render(nextState) {
@@ -358,6 +476,18 @@
     renderWeather(state.weather || {});
     renderSpotify(state.spotify || {});
     renderCalendar(state.calendar || {});
+  }
+
+  function scheduleMidnightRerender() {
+    window.clearTimeout(midnightTimer);
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 2, 0); // 2s slack so we land safely past the boundary
+    const delayMs = Math.max(nextMidnight.getTime() - now.getTime(), 1000);
+    midnightTimer = window.setTimeout(() => {
+      render(state);
+      scheduleMidnightRerender();
+    }, delayMs);
   }
 
   async function fetchState() {
@@ -385,27 +515,43 @@
 
   async function postAction(endpoint) {
     try {
-      await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      await fetchState();
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body || body.ok === false) {
+        return { ok: false, message: (body && body.message) || "Netzwerkfehler.", state: null };
+      }
+      return { ok: true, message: body.message || "ok", state: body.state || null };
     } catch (error) {
-      window.console.debug("spotify action failed", error);
+      return { ok: false, message: "Netzwerkfehler.", state: null };
     }
   }
 
   async function postJson(endpoint, payload) {
     try {
-      await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      await fetchState();
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body || body.ok === false) {
+        return { ok: false, message: (body && body.message) || "Netzwerkfehler.", state: null };
+      }
+      return { ok: true, message: body.message || "ok", state: body.state || null };
     } catch (error) {
-      window.console.debug("spotify json action failed", error);
+      return { ok: false, message: "Netzwerkfehler.", state: null };
     }
+  }
+
+  function applySpotifyState(spotifyState) {
+    if (!spotifyState) {
+      return;
+    }
+    state = { ...state, spotify: spotifyState };
+    renderSpotify(spotifyState);
   }
 
   async function loadScreensaverImage() {
@@ -482,18 +628,66 @@
     });
 
     nodes.screensaver.addEventListener("pointerdown", exitScreensaver, { passive: true });
-    nodes.spotifyPrevious.addEventListener("click", () => postAction("/api/spotify/previous"));
-    nodes.spotifyToggle.addEventListener("click", () => postAction("/api/spotify/toggle"));
-    nodes.spotifyNext.addEventListener("click", () => postAction("/api/spotify/next"));
+
+    if (nodes.toast) {
+      nodes.toast.addEventListener("pointerdown", hideToast, { passive: true });
+    }
+
+    nodes.spotifyToggle.addEventListener("click", async () => {
+      const currentSpotify = state.spotify || {};
+      const previousIsPlaying = Boolean(currentSpotify.is_playing);
+      // Optimistic flip so the button feels alive on touch.
+      applySpotifyState({ ...currentSpotify, is_playing: !previousIsPlaying });
+      const result = await postAction("/api/spotify/toggle");
+      if (result.ok && result.state) {
+        applySpotifyState(result.state);
+      } else if (result.ok === false) {
+        applySpotifyState({ ...currentSpotify, is_playing: previousIsPlaying });
+        showToast(result.message || "Spotify nicht erreichbar.");
+      }
+    });
+
+    nodes.spotifyNext.addEventListener("click", async () => {
+      const result = await postAction("/api/spotify/next");
+      if (result.ok && result.state) {
+        applySpotifyState(result.state);
+      } else if (result.ok === false) {
+        showToast(result.message || "Spotify nicht erreichbar.");
+      }
+    });
+
+    nodes.spotifyPrevious.addEventListener("click", async () => {
+      const result = await postAction("/api/spotify/previous");
+      if (result.ok && result.state) {
+        applySpotifyState(result.state);
+      } else if (result.ok === false) {
+        showToast(result.message || "Spotify nicht erreichbar.");
+      }
+    });
+
+    nodes.spotifyVolume.addEventListener("pointerdown", markVolumeBusy, { passive: true });
+    nodes.spotifyVolume.addEventListener("touchstart", markVolumeBusy, { passive: true });
     nodes.spotifyVolume.addEventListener("input", () => {
+      markVolumeBusy();
       nodes.spotifyVolumeReadout.textContent = `${nodes.spotifyVolume.value}%`;
     });
     nodes.spotifyVolume.addEventListener("change", () => {
       window.clearTimeout(volumeCommitTimer);
-      volumeCommitTimer = window.setTimeout(() => {
-        postJson("/api/spotify/volume", {
-          volume_percent: Number(nodes.spotifyVolume.value),
+      const targetValue = Number(nodes.spotifyVolume.value);
+      volumeLastSent = targetValue;
+      markVolumeBusy();
+      volumeCommitTimer = window.setTimeout(async () => {
+        const result = await postJson("/api/spotify/volume", {
+          volume_percent: targetValue,
         });
+        if (result.ok && result.state) {
+          applySpotifyState(result.state);
+        } else if (result.ok === false) {
+          // Command failed — release the dirty lock so future snapshots render.
+          delete nodes.spotifyVolume.dataset.dirty;
+          volumeLastSent = null;
+          showToast(result.message || "Spotify nicht erreichbar.");
+        }
       }, 120);
     });
     window.addEventListener("resize", () => {
@@ -506,6 +700,7 @@
   updateClock();
   render(state);
   schedulePolling();
+  scheduleMidnightRerender();
   resetIdleTimer();
   window.setInterval(updateClock, 1000);
   if (document.fonts && document.fonts.ready) {

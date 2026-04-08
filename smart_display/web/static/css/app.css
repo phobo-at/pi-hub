@@ -842,6 +842,14 @@ body {
   .spotify-card.is-inactive .spotify-device-badge {
     font-size: 10px;
   }
+
+  .toast {
+    bottom: 18px;
+    padding: 12px 18px;
+    font-size: 15px;
+    border-radius: 14px;
+    max-width: min(520px, calc(100% - 36px));
+  }
 }
 
 .screensaver {
@@ -898,4 +906,39 @@ body {
   color: var(--muted);
   font-size: 20px;
   letter-spacing: 0.04em;
+}
+
+/* Toast (Plan A4). One-shot message for Spotify/control errors. Single-slot:
+   a new toast replaces the active one. Tap anywhere on the toast to dismiss. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translate(-50%, 12px);
+  max-width: min(560px, calc(100% - 48px));
+  padding: 14px 22px;
+  border-radius: 16px;
+  background: rgba(22, 27, 34, 0.96);
+  border: 1px solid rgba(242, 167, 167, 0.32);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+  z-index: 30;
+  text-align: center;
+}
+
+.toast[data-kind="info"] {
+  border-color: rgba(216, 231, 255, 0.32);
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
 }
