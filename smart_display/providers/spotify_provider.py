@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import base64
-import json
 import threading
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+from typing import Any
 
 from smart_display.config import AppConfig
+from smart_display.http_client import HttpClient, HttpError, HttpResponse
 from smart_display.models import ProviderSnapshot, SpotifyState
 from smart_display.providers.base import BaseProvider
 from smart_display.state_store import StateStore
@@ -50,13 +49,21 @@ class SpotifyProvider(BaseProvider):
     section_name = "spotify"
     source_name = "spotify"
 
-    def __init__(self, config: AppConfig, state_store: StateStore):
+    def __init__(
+        self,
+        config: AppConfig,
+        state_store: StateStore,
+        http_client: HttpClient | None = None,
+    ):
         super().__init__(config.refresh_intervals.spotify_seconds)
         self.config = config
         self.state_store = state_store
+        self._http = http_client or HttpClient()
         self._token_lock = threading.Lock()
         self._access_token: str | None = None
         self._token_expiry = datetime.now(timezone.utc)
+
+    # ---- scheduler entrypoint --------------------------------------------
 
     def refresh(self) -> None:
         if self.config.app.demo_mode and not self.config.spotify.enabled:
@@ -73,7 +80,7 @@ class SpotifyProvider(BaseProvider):
             return
 
         try:
-            payload, status_code = self._api_request("GET", "/me/player")
+            response = self._api_request("GET", "/me/player")
         except Exception as exc:
             self.logger.exception("spotify refresh failed")
             self.state_store.mark_error(
@@ -84,7 +91,7 @@ class SpotifyProvider(BaseProvider):
             )
             return
 
-        if status_code in {204, 202, 404} or not payload:
+        if response.status in {202, 204, 404} or not response.body:
             self.state_store.update_section(
                 self.section_name,
                 SpotifyState(
@@ -95,42 +102,108 @@ class SpotifyProvider(BaseProvider):
             )
             return
 
+        if response.status == 401:
+            with self._token_lock:
+                self._access_token = None
+            self.state_store.mark_error(
+                self.section_name,
+                error_message="Spotify-Authentifizierung fehlgeschlagen.",
+                stale_after_seconds=self.refresh_interval_seconds * 2,
+                source=self.source_name,
+            )
+            return
+
+        if response.status >= 400:
+            self.state_store.mark_error(
+                self.section_name,
+                error_message=f"Spotify antwortete mit {response.status}.",
+                stale_after_seconds=self.refresh_interval_seconds * 2,
+                source=self.source_name,
+            )
+            return
+
+        try:
+            payload = response.json()
+        except Exception as exc:
+            self.logger.exception("spotify payload parse failed")
+            self.state_store.mark_error(
+                self.section_name,
+                error_message=str(exc),
+                stale_after_seconds=self.refresh_interval_seconds * 2,
+                source=self.source_name,
+            )
+            return
+
         self.state_store.update_section(
             self.section_name,
             build_spotify_state_from_payload(payload, self.snapshot(status="ok")),
         )
 
-    def toggle_playback(self) -> dict[str, object]:
+    # ---- control commands -------------------------------------------------
+
+    def toggle_playback(self) -> dict[str, Any]:
         state = self.state_store.get_state().spotify
         endpoint = "/me/player/pause" if state.is_playing else "/me/player/play"
         return self._send_command("PUT", endpoint)
 
-    def next_track(self) -> dict[str, object]:
+    def next_track(self) -> dict[str, Any]:
         return self._send_command("POST", "/me/player/next")
 
-    def previous_track(self) -> dict[str, object]:
+    def previous_track(self) -> dict[str, Any]:
         return self._send_command("POST", "/me/player/previous")
 
-    def set_volume(self, volume_percent: int) -> dict[str, object]:
+    def set_volume(self, volume_percent: int) -> dict[str, Any]:
         value = max(0, min(int(volume_percent), 100))
         return self._send_command(
             "PUT",
             f"/me/player/volume?{urllib.parse.urlencode({'volume_percent': value})}",
         )
 
-    def _send_command(self, method: str, path: str) -> dict[str, object]:
+    def _send_command(self, method: str, path: str) -> dict[str, Any]:
         if not self._is_configured():
-            return {"ok": False, "message": "Spotify ist nicht konfiguriert."}
+            return {
+                "ok": False,
+                "message": "Spotify ist nicht konfiguriert.",
+                "state": None,
+            }
 
         try:
-            _, status_code = self._api_request(method, path, expect_json=False)
-        except Exception as exc:
-            return {"ok": False, "message": str(exc)}
+            response = self._api_request(method, path)
+        except HttpError as exc:
+            return {"ok": False, "message": str(exc), "state": None}
+        except Exception as exc:  # noqa: BLE001 — token refresh errors bubble here
+            return {"ok": False, "message": str(exc), "state": None}
 
-        if status_code not in {200, 202, 204}:
-            return {"ok": False, "message": f"Spotify antwortete mit {status_code}."}
+        if response.status == 401:
+            with self._token_lock:
+                self._access_token = None
+            return {
+                "ok": False,
+                "message": "Spotify-Anmeldung abgelaufen.",
+                "state": None,
+            }
 
-        return {"ok": True, "message": "ok"}
+        if response.status not in {200, 202, 204}:
+            return {
+                "ok": False,
+                "message": f"Spotify antwortete mit {response.status}.",
+                "state": None,
+            }
+
+        # Command worked — pull fresh truth inline so the UI never waits on
+        # the next poll tick to reflect play/pause/volume changes.
+        try:
+            self.refresh()
+        except Exception as exc:  # noqa: BLE001 — never let inline refresh break the command
+            self.logger.warning("spotify inline refresh failed: %s", exc)
+
+        return {
+            "ok": True,
+            "message": "ok",
+            "state": self.state_store.get_state().spotify.to_dict(),
+        }
+
+    # ---- HTTP / auth internals -------------------------------------------
 
     def _is_configured(self) -> bool:
         return self.config.spotify.enabled and all(
@@ -141,82 +214,52 @@ class SpotifyProvider(BaseProvider):
             ]
         )
 
-    def _api_request(
-        self,
-        method: str,
-        path: str,
-        *,
-        expect_json: bool = True,
-    ) -> tuple[dict | None, int]:
+    def _api_request(self, method: str, path: str) -> HttpResponse:
         token = self._access_token_value()
         url = f"https://api.spotify.com/v1{path}"
         if self.config.spotify.device_id and method in {"PUT", "POST"}:
-            query = urllib.parse.urlencode({"device_id": self.config.spotify.device_id})
+            query = urllib.parse.urlencode(
+                {"device_id": self.config.spotify.device_id}
+            )
             separator = "&" if "?" in url else "?"
             url = f"{url}{separator}{query}"
 
-        request = urllib_request.Request(
+        body = b"" if method in {"POST", "PUT"} else None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        return self._http.request(
+            method,
             url,
-            method=method,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "pi-hub-smart-display/0.1",
-                "Content-Type": "application/json",
-            },
-            data=b"" if method in {"POST", "PUT"} else None,
+            body=body,
+            headers=headers,
+            timeout=self.config.spotify.timeout_seconds,
         )
-        try:
-            with urllib_request.urlopen(
-                request, timeout=self.config.spotify.timeout_seconds
-            ) as response:
-                status_code = response.getcode()
-                body = response.read().decode("utf-8") if expect_json else ""
-                return (json.loads(body) if body else None, status_code)
-        except urllib_error.HTTPError as exc:
-            if exc.code == 204:
-                return None, 204
-            if exc.code in {401, 404}:
-                body = exc.read().decode("utf-8")
-                if exc.code == 401:
-                    with self._token_lock:
-                        self._access_token = None
-                    raise RuntimeError("Spotify-Authentifizierung fehlgeschlagen.") from exc
-                raise RuntimeError(body or "Kein aktives Spotify-Gerät.") from exc
-            raise RuntimeError(exc.read().decode("utf-8") or str(exc)) from exc
 
     def _access_token_value(self) -> str:
         with self._token_lock:
             if self._access_token and datetime.now(timezone.utc) < self._token_expiry:
                 return self._access_token
 
-            credentials = f"{self.config.spotify.client_id}:{self.config.spotify.client_secret}"
+            credentials = (
+                f"{self.config.spotify.client_id}:{self.config.spotify.client_secret}"
+            )
             encoded = base64.b64encode(credentials.encode("utf-8")).decode("ascii")
-            body = urllib.parse.urlencode(
+            response = self._http.post_form(
+                "https://accounts.spotify.com/api/token",
                 {
                     "grant_type": "refresh_token",
                     "refresh_token": self.config.spotify.refresh_token,
-                }
-            ).encode("utf-8")
-            request = urllib_request.Request(
-                "https://accounts.spotify.com/api/token",
-                method="POST",
-                data=body,
-                headers={
-                    "Authorization": f"Basic {encoded}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "pi-hub-smart-display/0.1",
                 },
+                headers={"Authorization": f"Basic {encoded}"},
+                timeout=self.config.spotify.timeout_seconds,
             )
-            try:
-                with urllib_request.urlopen(
-                    request, timeout=self.config.spotify.timeout_seconds
-                ) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-            except urllib_error.HTTPError as exc:
+            if not response.ok:
                 raise RuntimeError(
-                    exc.read().decode("utf-8") or "Spotify token refresh fehlgeschlagen."
-                ) from exc
-
+                    response.text() or "Spotify token refresh fehlgeschlagen."
+                )
+            payload = response.json()
             self._access_token = str(payload["access_token"])
             expires_in = int(payload.get("expires_in", 3600))
             self._token_expiry = datetime.now(timezone.utc) + timedelta(
