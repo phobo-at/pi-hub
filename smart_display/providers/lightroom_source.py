@@ -3,17 +3,21 @@ from __future__ import annotations
 import html
 import re
 from html.parser import HTMLParser
-from urllib import error as urllib_error
 from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
 from smart_display.cache.image_cache import ImageCache
 from smart_display.config import AppConfig
+from smart_display.http_client import HttpClient, HttpError
 from smart_display.providers.base import BaseProvider
 from smart_display.state_store import StateStore
 
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+
+# Plan B9: HTML pages from Lightroom public albums are small JSON islands
+# inside a static shell — 512 KiB is plenty and protects us from accidental
+# multi-MB error pages.
+HTML_MAX_BYTES = 512_000
 
 
 class _ImageCollector(HTMLParser):
@@ -70,11 +74,18 @@ class LightroomSourceProvider(BaseProvider):
     section_name = "screensaver"
     source_name = "lightroom"
 
-    def __init__(self, config: AppConfig, state_store: StateStore, image_cache: ImageCache):
+    def __init__(
+        self,
+        config: AppConfig,
+        state_store: StateStore,
+        image_cache: ImageCache,
+        http_client: HttpClient | None = None,
+    ):
         super().__init__(config.refresh_intervals.lightroom_seconds)
         self.config = config
         self.state_store = state_store
         self.image_cache = image_cache
+        self._http = http_client or HttpClient()
 
     def refresh(self) -> None:
         available_demo = (
@@ -105,25 +116,29 @@ class LightroomSourceProvider(BaseProvider):
             return
 
         try:
-            request = urllib_request.Request(
+            response = self._http.get(
                 self.config.screensaver.source_url,
-                headers={"User-Agent": "pi-hub-smart-display/0.1"},
+                timeout=self.config.screensaver.timeout_seconds,
+                max_bytes=HTML_MAX_BYTES,
             )
-            with urllib_request.urlopen(
-                request, timeout=self.config.screensaver.timeout_seconds
-            ) as response:
-                html_text = response.read().decode("utf-8", errors="ignore")
+            if not response.ok:
+                raise HttpError(
+                    f"Lightroom antwortete mit {response.status}"
+                )
+            html_text = response.text()
             image_urls = extract_image_urls(html_text, self.config.screensaver.source_url)
             if not image_urls:
                 raise RuntimeError("Keine Bild-URLs im Lightroom-Album gefunden.")
             entries = self.image_cache.sync_remote_images(
-                image_urls, timeout_seconds=self.config.screensaver.timeout_seconds
+                image_urls,
+                timeout_seconds=self.config.screensaver.timeout_seconds,
+                max_new_downloads=max(self.config.screensaver.images_per_tick, 1),
             )
             status = "ok" if entries else "empty"
             self.state_store.set_provider_snapshot(self.section_name, self.snapshot(status=status))
             self.state_store.set_screensaver_photo_count(len(entries))
-        except (urllib_error.URLError, RuntimeError) as exc:
-            self.logger.exception("screensaver refresh failed")
+        except (HttpError, RuntimeError) as exc:
+            self.logger.warning("screensaver refresh failed: %s", exc)
             fallback_status = "stale" if self.image_cache.count() > 0 else "error"
             self.state_store.set_provider_snapshot(
                 self.section_name,
@@ -132,4 +147,3 @@ class LightroomSourceProvider(BaseProvider):
             self.state_store.set_screensaver_photo_count(
                 self.image_cache.count() or available_demo
             )
-

@@ -42,7 +42,8 @@
     "source_url": "",
     "cache_dir": "screensaver",
     "demo_images_enabled": true,
-    "timeout_seconds": 15
+    "timeout_seconds": 15,
+    "images_per_tick": 1
   },
   "refresh_intervals": {
     "weather_seconds": 900,

@@ -66,6 +66,7 @@ class ScreensaverConfig:
     cache_dir: str
     demo_images_enabled: bool
     timeout_seconds: int
+    images_per_tick: int = 1
 
 
 @dataclass(slots=True)
@@ -212,6 +213,9 @@ def load_config_from_mapping(
             timeout_seconds=int(
                 mapping.get("screensaver", {}).get("timeout_seconds", 15)
             ),
+            images_per_tick=int(
+                mapping.get("screensaver", {}).get("images_per_tick", 1)
+            ),
         ),
         refresh_intervals=RefreshIntervalsConfig(
             weather_seconds=int(
@@ -328,6 +332,7 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
             "demo_images_enabled",
         ),
         "SCREENSAVER_TIMEOUT_SECONDS": ("screensaver", "timeout_seconds"),
+        "SCREENSAVER_IMAGES_PER_TICK": ("screensaver", "images_per_tick"),
         "REFRESH_WEATHER_SECONDS": ("refresh_intervals", "weather_seconds"),
         "REFRESH_CALENDAR_SECONDS": ("refresh_intervals", "calendar_seconds"),
         "REFRESH_SPOTIFY_SECONDS": ("refresh_intervals", "spotify_seconds"),

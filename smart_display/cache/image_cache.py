@@ -4,12 +4,13 @@ import hashlib
 import io
 import logging
 import random
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
-from urllib import error as urllib_error
-from urllib import request as urllib_request
+from typing import Any, Callable
 
 from smart_display.cache.disk_cache import DiskCache
+from smart_display.http_client import HttpClient, HttpError
 from smart_display.models import PhotoManifestEntry
 
 
@@ -18,12 +19,30 @@ logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image, ImageOps  # type: ignore
+
+    # Plan B9: cap the decoded-pixel budget so a malicious or broken album
+    # entry can't exhaust the 512 MB Pi. 24 Mpx ≈ 96 MB at 4 bytes/pixel —
+    # comfortably below the working set we can afford.
+    Image.MAX_IMAGE_PIXELS = 24_000_000
 except ImportError:  # pragma: no cover
     Image = None
     ImageOps = None
 
 
 DownloadResult = tuple[bytes, dict[str, str]]
+
+# Plan B9: bounded read for screensaver image downloads. Any single image
+# larger than this is treated as a payload error and skipped.
+IMAGE_MAX_BYTES = 8_000_000
+
+# Retry backoff for failed downloads. Doubles on each attempt, capped at 24 h.
+_INITIAL_BACKOFF_SECONDS = 60.0
+_MAX_BACKOFF_SECONDS = 24 * 60 * 60.0
+
+
+def _compute_next_retry(attempts: int) -> float:
+    backoff = _INITIAL_BACKOFF_SECONDS * (2 ** max(attempts - 1, 0))
+    return min(backoff, _MAX_BACKOFF_SECONDS)
 
 
 class ImageCache:
@@ -35,15 +54,22 @@ class ImageCache:
         display_size: tuple[int, int] = (1024, 600),
         downloader: Callable[[str, int], DownloadResult] | None = None,
         demo_dir: str | Path | None = None,
+        http_client: HttpClient | None = None,
+        clock: Callable[[], float] | None = None,
     ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.demo_dir = Path(demo_dir) if demo_dir else None
         self.manifest_cache = DiskCache(manifest_path)
+        self.failures_cache = DiskCache(self.cache_dir / "failed.json")
         self.display_size = display_size
+        self._http = http_client  # created lazily so tests with a custom
+        # downloader never touch the network.
         self._downloader = downloader or self._default_download
         self._random = random.Random()
+        self._clock = clock or time.time
         self._entries = self._load_manifest()
+        self._failures: dict[str, dict[str, Any]] = self._load_failures()
 
     def entries(self) -> list[PhotoManifestEntry]:
         return list(self._entries)
@@ -52,8 +78,25 @@ class ImageCache:
         return len(self._entries)
 
     def sync_remote_images(
-        self, source_urls: list[str], *, timeout_seconds: int
+        self,
+        source_urls: list[str],
+        *,
+        timeout_seconds: int,
+        max_new_downloads: int | None = None,
     ) -> list[PhotoManifestEntry]:
+        """Reconcile the manifest against ``source_urls``.
+
+        Plan B9:
+        - At most ``max_new_downloads`` new entries are fetched per call
+          (default: unbounded; the provider passes a small cap like 1 to
+          spread CPU across refresh ticks on the Pi Zero).
+        - URLs that previously failed with a decompression bomb, payload
+          error, or decode error are skipped until their exponential
+          backoff window elapses.
+        - Existing cached entries are preserved across calls even when the
+          per-tick budget is exhausted — only the manifest's URL set
+          shrinks to ``source_urls``.
+        """
         unique_urls = list(dict.fromkeys(source_urls))
         existing = {
             entry.source_url: entry
@@ -63,20 +106,45 @@ class ImageCache:
 
         next_entries: list[PhotoManifestEntry] = []
         used_filenames: set[str] = set()
+        pending_urls: list[str] = []
+
         for url in unique_urls:
             cached = existing.get(url)
             if cached:
                 next_entries.append(cached)
                 used_filenames.add(Path(cached.local_path).name)
+            else:
+                pending_urls.append(url)
+
+        now = self._clock()
+        budget = max_new_downloads if max_new_downloads is not None else len(pending_urls)
+        attempted = 0
+        for url in pending_urls:
+            if attempted >= budget:
+                break
+            if self._is_in_backoff(url, now):
                 continue
-            downloaded = self._download_and_prepare(url, timeout_seconds=timeout_seconds)
-            if downloaded:
-                next_entries.append(downloaded)
-                used_filenames.add(Path(downloaded.local_path).name)
+            attempted += 1
+            try:
+                downloaded = self._download_and_prepare(
+                    url, timeout_seconds=timeout_seconds
+                )
+            except Exception as exc:  # noqa: BLE001 — Pillow exceptions vary
+                self._record_failure(url, exc)
+                continue
+            if downloaded is None:
+                continue
+            self._clear_failure(url)
+            next_entries.append(downloaded)
+            used_filenames.add(Path(downloaded.local_path).name)
+
+        # Drop failures for URLs that are no longer in the source list.
+        self._prune_failures(set(unique_urls))
 
         self._entries = next_entries
         self._cleanup_unused_files(used_filenames)
         self.manifest_cache.save([entry.to_dict() for entry in self._entries])
+        self.failures_cache.save(self._failures)
         return self.entries()
 
     def next_entry(self, *, include_demo: bool = True) -> PhotoManifestEntry | None:
@@ -112,6 +180,54 @@ class ImageCache:
             if Path(entry.local_path).name == filename:
                 return entry
         return None
+
+    def failed_urls(self) -> dict[str, dict[str, Any]]:
+        """Expose failure state (used by tests and status reporting)."""
+        return dict(self._failures)
+
+    # ---- Failure bookkeeping -----------------------------------------------
+
+    def _is_in_backoff(self, url: str, now: float) -> bool:
+        failure = self._failures.get(url)
+        if not failure:
+            return False
+        next_retry = float(failure.get("next_retry_at", 0.0))
+        return now < next_retry
+
+    def _record_failure(self, url: str, exc: BaseException) -> None:
+        current = self._failures.get(url, {"attempts": 0})
+        attempts = int(current.get("attempts", 0)) + 1
+        backoff = _compute_next_retry(attempts)
+        next_retry_at = self._clock() + backoff
+        self._failures[url] = {
+            "attempts": attempts,
+            "next_retry_at": next_retry_at,
+            "next_retry_iso": datetime.fromtimestamp(
+                next_retry_at, tz=timezone.utc
+            ).isoformat(),
+            "last_error": f"{type(exc).__name__}: {exc}",
+        }
+        logger.warning(
+            "screensaver image download failed for %s (attempt %d, retry in %.0fs): %s",
+            url,
+            attempts,
+            backoff,
+            exc,
+        )
+
+    def _clear_failure(self, url: str) -> None:
+        self._failures.pop(url, None)
+
+    def _prune_failures(self, live_urls: set[str]) -> None:
+        stale = [url for url in self._failures if url not in live_urls]
+        for url in stale:
+            self._failures.pop(url, None)
+
+    def _load_failures(self) -> dict[str, dict[str, Any]]:
+        raw = self.failures_cache.load()
+        if isinstance(raw, dict):
+            return {str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)}
+        return {}
 
     def _load_manifest(self) -> list[PhotoManifestEntry]:
         # DiskCache.load() already quarantines unparseable JSON (Plan S2).
@@ -152,7 +268,11 @@ class ImageCache:
 
     def _cleanup_unused_files(self, used_filenames: set[str]) -> None:
         for path in self.cache_dir.iterdir():
-            if path.is_file() and path.name != "manifest.json" and path.name not in used_filenames:
+            if (
+                path.is_file()
+                and path.name not in {"manifest.json", "failed.json"}
+                and path.name not in used_filenames
+            ):
                 path.unlink(missing_ok=True)
 
     def _download_and_prepare(
@@ -165,13 +285,22 @@ class ImageCache:
         width, height = self.display_size
 
         if Image is not None and ImageOps is not None:
-            with Image.open(io.BytesIO(payload)) as image:
-                prepared = ImageOps.exif_transpose(image).convert("RGB")
-                fitted = ImageOps.fit(
-                    prepared, self.display_size, method=Image.Resampling.LANCZOS
-                )
-                fitted.save(local_path, format="JPEG", quality=86, optimize=True)
-                width, height = fitted.size
+            # Plan B9: any Pillow error — malformed bytes, dimensions over
+            # the MAX_IMAGE_PIXELS cap, unsupported format — becomes a
+            # skipped entry with an exponential-backoff retry, never a
+            # crash of the refresh loop.
+            try:
+                with Image.open(io.BytesIO(payload)) as image:
+                    prepared = ImageOps.exif_transpose(image).convert("RGB")
+                    fitted = ImageOps.fit(
+                        prepared, self.display_size, method=Image.Resampling.LANCZOS
+                    )
+                    fitted.save(local_path, format="JPEG", quality=86, optimize=True)
+                    width, height = fitted.size
+            except (OSError, ValueError, Image.DecompressionBombError) as exc:
+                raise RuntimeError(
+                    f"unable to decode image {source_url}: {exc}"
+                ) from exc
         else:  # pragma: no cover
             local_path.write_bytes(payload)
 
@@ -188,15 +317,18 @@ class ImageCache:
         )
 
     def _default_download(self, url: str, timeout_seconds: int) -> DownloadResult:
-        request = urllib_request.Request(
-            url,
-            headers={"User-Agent": "pi-hub-smart-display/0.1"},
-        )
+        if self._http is None:
+            self._http = HttpClient()
         try:
-            with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
-                payload = response.read()
-                headers = {key.lower(): value for key, value in response.headers.items()}
-                return payload, headers
-        except urllib_error.URLError as exc:  # pragma: no cover
+            response = self._http.get(
+                url,
+                timeout=timeout_seconds,
+                max_bytes=IMAGE_MAX_BYTES,
+            )
+        except HttpError as exc:
             raise RuntimeError(f"image download failed for {url}: {exc}") from exc
-
+        if not response.ok:
+            raise RuntimeError(
+                f"image download failed for {url}: status {response.status}"
+            )
+        return response.body, dict(response.headers)
