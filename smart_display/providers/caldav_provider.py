@@ -246,7 +246,12 @@ def _collect_calendar_items(
                 if key in seen:
                     continue
                 seen.add(key)
-                if start <= _coerce_datetime(starts_at, ZoneInfo(timezone_name)) < end or item.all_day:
+                # Plan B11: drop the unconditional ``or item.all_day`` — an
+                # all-day event must still fall inside the [start, end)
+                # window (``_coerce_datetime`` normalises date → midnight in
+                # the configured zone so the same bounds check works).
+                event_start = _coerce_datetime(starts_at, ZoneInfo(timezone_name))
+                if start <= event_start < end:
                     results.append(item)
 
     return sorted(results, key=lambda item: (item.starts_at, item.title.lower()))
