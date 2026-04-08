@@ -47,7 +47,7 @@
   "refresh_intervals": {
     "weather_seconds": 900,
     "calendar_seconds": 300,
-    "spotify_seconds": 10,
+    "spotify_seconds": 30,
     "lightroom_seconds": 1800
   }
 }

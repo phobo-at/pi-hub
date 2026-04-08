@@ -581,6 +581,22 @@
     nodes.screensaverFallback.style.display = "flex";
   }
 
+  function notifyScreensaverState(active) {
+    // Plan B1: tell the backend so it can pause/resume the Spotify poll
+    // group. Fire-and-forget — a failure here must not keep the screensaver
+    // from showing.
+    try {
+      fetch("/api/screensaver/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: Boolean(active) }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
   function enterScreensaver() {
     if (screensaverActive) {
       return;
@@ -593,6 +609,7 @@
       loadScreensaverImage,
       Math.max((config.image_duration_seconds || 15) * 1000, 5000),
     );
+    notifyScreensaverState(true);
   }
 
   function exitScreensaver() {
@@ -603,6 +620,7 @@
     nodes.screensaver.classList.remove("is-active");
     window.clearInterval(slideshowTimer);
     resetIdleTimer();
+    notifyScreensaverState(false);
     fetchState();
   }
 

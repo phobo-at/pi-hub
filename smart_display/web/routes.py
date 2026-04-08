@@ -53,6 +53,19 @@ def create_blueprint() -> Blueprint:
             return jsonify({"image": None})
         return jsonify({"image": entry.to_dict()})
 
+    @blueprint.post("/api/screensaver/state")
+    def screensaver_state():
+        """Plan B1: the frontend tells us when the screensaver is visible so
+        we can pause the Spotify polling group. Saves one request every 30 s
+        whenever the user is away from the panel."""
+        services = current_app.extensions["smart_display"]
+        payload = request.get_json(silent=True) or {}
+        active = bool(payload.get("active", False))
+        scheduler = services.get("scheduler")
+        if scheduler is not None:
+            scheduler.set_paused("spotify", active)
+        return jsonify({"ok": True, "active": active})
+
     @blueprint.post("/api/spotify/toggle")
     def spotify_toggle():
         services = current_app.extensions["smart_display"]
