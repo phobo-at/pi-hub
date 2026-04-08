@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 600" role="img" aria-label="Demo screensaver 1">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10171f"/>
+      <stop offset="55%" stop-color="#1c2d3f"/>
+      <stop offset="100%" stop-color="#31485f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="600" fill="url(#bg)"/>
+  <circle cx="230" cy="180" r="150" fill="#bfd8ef" opacity="0.12"/>
+  <circle cx="810" cy="460" r="200" fill="#f0d4b2" opacity="0.12"/>
+  <text x="80" y="470" fill="#f5f7fa" font-family="Noto Sans, sans-serif" font-size="72" font-weight="700">Wohnzimmer</text>
+  <text x="82" y="525" fill="#c8d3df" font-family="Noto Sans, sans-serif" font-size="26">Demo-Bild fuer den lokalen Screensaver-Cache</text>
+</svg>
+

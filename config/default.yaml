@@ -1,0 +1,54 @@
+{
+  "app": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "locale": "de-AT",
+    "timezone": "Europe/Vienna",
+    "data_dir": "./data",
+    "log_level": "INFO",
+    "demo_mode": false
+  },
+  "weather": {
+    "enabled": true,
+    "provider": "openmeteo",
+    "label": "Zuhause",
+    "latitude": 48.2082,
+    "longitude": 16.3738,
+    "api_key": null,
+    "timeout_seconds": 10
+  },
+  "calendar": {
+    "enabled": false,
+    "url": "",
+    "username": "",
+    "password": "",
+    "calendar_names": [],
+    "timeout_seconds": 10
+  },
+  "spotify": {
+    "enabled": false,
+    "client_id": "",
+    "client_secret": "",
+    "refresh_token": "",
+    "device_id": "",
+    "market": "AT",
+    "timeout_seconds": 10
+  },
+  "screensaver": {
+    "enabled": true,
+    "idle_timeout_seconds": 120,
+    "image_duration_seconds": 15,
+    "refresh_interval_seconds": 1800,
+    "source_url": "",
+    "cache_dir": "screensaver",
+    "demo_images_enabled": true,
+    "timeout_seconds": 15
+  },
+  "refresh_intervals": {
+    "weather_seconds": 900,
+    "calendar_seconds": 300,
+    "spotify_seconds": 10,
+    "lightroom_seconds": 1800
+  }
+}
+

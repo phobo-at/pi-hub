@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>{{ app_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  </head>
+  <body>
+    <script>
+      window.__SMART_DISPLAY__ = {{ {"config": ui_config, "state": initial_state}|tojson }};
+    </script>
+
+    <main class="dashboard-shell" id="dashboard-shell">
+      <section class="hero-panel">
+        <div class="hero-panel__inner">
+          <div class="hero-time" id="clock-time">--:--</div>
+          <div class="hero-date" id="clock-date">--</div>
+          <div class="hero-meta">
+            <span id="hero-locale">{{ ui_config.timezone }}</span>
+          </div>
+          <section class="hero-weather">
+            <header class="hero-weather__header">
+              <h2 class="hero-weather__title" id="weather-location">Wetter Zuhause</h2>
+              <span class="status-pill is-hidden" id="weather-status">Laden</span>
+            </header>
+            <div class="hero-weather__body">
+              <div class="hero-weather__temperature" id="weather-temperature">--</div>
+              <div class="hero-weather__summary">
+                <div class="hero-weather__icon" id="weather-icon" aria-hidden="true"></div>
+                <div>
+                  <div class="hero-weather__condition" id="weather-condition">Wetterdaten werden geladen.</div>
+                  <div class="hero-weather__secondary" id="weather-secondary"></div>
+                </div>
+              </div>
+            </div>
+            <div class="hero-weather__forecast" id="weather-forecast"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="cards-column">
+        <article class="card calendar-card">
+          <header class="card__header">
+            <h2 class="card__title">Termine</h2>
+            <span class="status-pill is-hidden" id="calendar-status">Laden</span>
+          </header>
+          <ul class="calendar-list" id="calendar-list"></ul>
+        </article>
+
+        <article class="card spotify-card" id="spotify-card">
+          <header class="card__header">
+            <h2 class="card__title">Spotify Wiedergabe</h2>
+            <span class="status-pill is-hidden" id="spotify-status">Laden</span>
+          </header>
+          <div class="spotify-body">
+            <div class="spotify-artwork" id="spotify-artwork"></div>
+            <div class="spotify-copy">
+              <div class="spotify-track" id="spotify-track">Keine aktive Wiedergabe</div>
+              <div class="spotify-artist" id="spotify-artist">Spotify nicht verbunden.</div>
+              <div class="spotify-device-row">
+                <div class="spotify-device-badge" id="spotify-device-badge">
+                  <span class="spotify-device-badge__icon" aria-hidden="true"></span>
+                  <span id="spotify-device">Kein aktives Gerät</span>
+                </div>
+                <div class="spotify-volume-readout" id="spotify-volume-readout"></div>
+              </div>
+            </div>
+          </div>
+          <div class="spotify-controls">
+            <div class="spotify-actions">
+              <button type="button" class="icon-button" id="spotify-previous" aria-label="Vorheriger Titel">
+                <span class="icon-button__icon" id="spotify-previous-icon" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="icon-button icon-button--primary" id="spotify-toggle" aria-label="Wiedergabe umschalten">
+                <span class="icon-button__icon" id="spotify-toggle-icon" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="icon-button" id="spotify-next" aria-label="Nächster Titel">
+                <span class="icon-button__icon" id="spotify-next-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <label class="spotify-volume" for="spotify-volume">
+              <span class="spotify-volume__label">Lautstärke</span>
+              <input type="range" min="0" max="100" step="1" value="0" id="spotify-volume">
+            </label>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <aside class="screensaver" id="screensaver" aria-hidden="true">
+      <img class="screensaver__image" id="screensaver-image" alt="">
+      <div class="screensaver__overlay"></div>
+      <div class="screensaver__fallback" id="screensaver-fallback">
+        <div class="screensaver__clock" id="screensaver-clock">--:--</div>
+        <div class="screensaver__caption">Berühren zum Aufwecken</div>
+      </div>
+    </aside>
+
+    <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </body>
+</html>

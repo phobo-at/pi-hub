@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 600" role="img" aria-label="Demo screensaver 3">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#11131a"/>
+      <stop offset="40%" stop-color="#2a2b36"/>
+      <stop offset="100%" stop-color="#5c534a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="600" fill="url(#bg)"/>
+  <circle cx="760" cy="160" r="120" fill="#ffffff" opacity="0.08"/>
+  <circle cx="300" cy="420" r="170" fill="#ffffff" opacity="0.06"/>
+  <text x="110" y="160" fill="#f5f7fa" font-family="Noto Sans, sans-serif" font-size="28" letter-spacing="8">SCREENSAVER</text>
+  <text x="110" y="240" fill="#f5f7fa" font-family="Noto Sans, sans-serif" font-size="86" font-weight="700">Lokaler Fallback</text>
+  <text x="112" y="306" fill="#d8e0e8" font-family="Noto Sans, sans-serif" font-size="28">Wenn Lightroom ausfaellt, bleibt die Anzeige ruhig und lesbar.</text>
+</svg>
+

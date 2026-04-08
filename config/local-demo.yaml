@@ -1,0 +1,38 @@
+{
+  "app": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "locale": "de-AT",
+    "timezone": "Europe/Vienna",
+    "data_dir": "./data/local-demo",
+    "log_level": "DEBUG",
+    "demo_mode": true
+  },
+  "weather": {
+    "enabled": false,
+    "label": "Demo Zuhause"
+  },
+  "calendar": {
+    "enabled": false
+  },
+  "spotify": {
+    "enabled": false
+  },
+  "screensaver": {
+    "enabled": true,
+    "idle_timeout_seconds": 45,
+    "image_duration_seconds": 8,
+    "refresh_interval_seconds": 900,
+    "source_url": "",
+    "cache_dir": "screensaver",
+    "demo_images_enabled": true,
+    "timeout_seconds": 10
+  },
+  "refresh_intervals": {
+    "weather_seconds": 900,
+    "calendar_seconds": 300,
+    "spotify_seconds": 15,
+    "lightroom_seconds": 900
+  }
+}
+

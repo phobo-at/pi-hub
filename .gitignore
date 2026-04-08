@@ -1,0 +1,32 @@
+# Secrets / local env
+.env
+.env.local
+*.env.local
+
+# Runtime data — populated by the app, must not be committed
+data/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json

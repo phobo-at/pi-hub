@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-display"
+version = "0.1.0"
+description = "Lightweight smart display for Raspberry Pi Zero 2 W"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Flask>=3.0,<4.0",
+  "waitress>=3.0,<4.0",
+  "Pillow>=10.0,<11.0",
+  "caldav>=1.3,<2.0",
+  "icalendar>=5.0,<6.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+smart-display = "smart_display.app:main"
+smart-display-local = "smart_display.local_server:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["smart_display*"]
