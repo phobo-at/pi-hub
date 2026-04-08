@@ -323,13 +323,34 @@
     return label.charAt(0).toUpperCase() + label.slice(1);
   }
 
+  // Plan B8: after the A3 backend rewrite the server always emits
+  // ``sections`` with a ``section_date``. The old flat-items fallback is
+  // gone — a malformed payload yields an empty calendar + a one-shot
+  // warning instead of silently labelling everything as "Heute".
+  let calendarMissingSectionsWarned = false;
+
   function normalizeCalendarSections(calendar) {
-    const sections = Array.isArray(calendar.sections) ? calendar.sections : [];
-    return sections
-      .filter((section) => Array.isArray(section.items) && section.items.length > 0)
+    if (!calendar || !Array.isArray(calendar.sections)) {
+      if (!calendarMissingSectionsWarned) {
+        calendarMissingSectionsWarned = true;
+        window.console.warn(
+          "calendar payload missing 'sections' array — ignoring",
+        );
+      }
+      return [];
+    }
+    return calendar.sections
+      .filter(
+        (section) =>
+          section &&
+          Array.isArray(section.items) &&
+          section.items.length > 0 &&
+          typeof section.section_date === "string" &&
+          section.section_date.length > 0,
+      )
       .map((section) => ({
         day_key: section.day_key || "",
-        section_date: section.section_date || "",
+        section_date: section.section_date,
         items: section.items,
       }));
   }
