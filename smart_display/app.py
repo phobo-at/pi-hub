@@ -54,13 +54,47 @@ def create_app(
 
     if start_scheduler:
         scheduler = Scheduler()
+        # Plan B2: stagger the boot fan-out so the Pi Zero doesn't hammer four
+        # upstream APIs in the first second after `systemctl start`. Jitter
+        # ±1 s on every subsequent interval spreads refreshes over long uptimes.
         scheduler.start(
             [
-                ScheduledJob("weather", app_config.refresh_intervals.weather_seconds, weather_provider.refresh),
-                ScheduledJob("calendar", app_config.refresh_intervals.calendar_seconds, calendar_provider.refresh),
-                ScheduledJob("spotify", app_config.refresh_intervals.spotify_seconds, spotify_provider.refresh),
-                ScheduledJob("screensaver", app_config.refresh_intervals.lightroom_seconds, screensaver_provider.refresh),
-                ScheduledJob("mock", 60, mock_provider.refresh),
+                ScheduledJob(
+                    name="weather",
+                    interval_seconds=app_config.refresh_intervals.weather_seconds,
+                    task=weather_provider.refresh,
+                    startup_delay_seconds=0.0,
+                    jitter_seconds=1.0,
+                ),
+                ScheduledJob(
+                    name="calendar",
+                    interval_seconds=app_config.refresh_intervals.calendar_seconds,
+                    task=calendar_provider.refresh,
+                    startup_delay_seconds=2.0,
+                    jitter_seconds=1.0,
+                ),
+                ScheduledJob(
+                    name="spotify",
+                    interval_seconds=app_config.refresh_intervals.spotify_seconds,
+                    task=spotify_provider.refresh,
+                    startup_delay_seconds=4.0,
+                    jitter_seconds=1.0,
+                    pause_group="spotify",
+                ),
+                ScheduledJob(
+                    name="screensaver",
+                    interval_seconds=app_config.refresh_intervals.lightroom_seconds,
+                    task=screensaver_provider.refresh,
+                    startup_delay_seconds=6.0,
+                    jitter_seconds=1.0,
+                ),
+                ScheduledJob(
+                    name="mock",
+                    interval_seconds=60,
+                    task=mock_provider.refresh,
+                    startup_delay_seconds=1.0,
+                    jitter_seconds=1.0,
+                ),
             ]
         )
         app.extensions["smart_display"]["scheduler"] = scheduler
