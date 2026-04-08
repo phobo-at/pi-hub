@@ -4,6 +4,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 
+from smart_display.i18n import format_initial_clock
 from smart_display.models import PhotoManifestEntry
 
 
@@ -15,6 +16,10 @@ def create_blueprint() -> Blueprint:
         services = current_app.extensions["smart_display"]
         config = services["config"]
         state = services["state_store"].to_dict()
+        # Plan B14: render the hero clock on the server so the cold-reload
+        # first frame is correct. JS overwrites these values on its first tick.
+        clock_factory = services.get("clock_factory", format_initial_clock)
+        initial_clock = clock_factory(config.app.timezone)
         return render_template(
             "index.html",
             app_title="Smart Display",
@@ -28,6 +33,7 @@ def create_blueprint() -> Blueprint:
                 ),
             },
             initial_state=state,
+            initial_clock=initial_clock,
         )
 
     @blueprint.get("/api/state")
