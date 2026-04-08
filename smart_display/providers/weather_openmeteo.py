@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from urllib import error as urllib_error
 from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
 from smart_display.config import AppConfig
+from smart_display.http_client import HttpClient, HttpError
 from smart_display.models import WeatherForecastItem, WeatherState
 from smart_display.providers._parsing import (
     safe_float,
@@ -47,10 +46,16 @@ class OpenMeteoProvider(BaseProvider):
     section_name = "weather"
     source_name = "open-meteo"
 
-    def __init__(self, config: AppConfig, state_store: StateStore):
+    def __init__(
+        self,
+        config: AppConfig,
+        state_store: StateStore,
+        http_client: HttpClient | None = None,
+    ):
         super().__init__(config.refresh_intervals.weather_seconds)
         self.config = config
         self.state_store = state_store
+        self._http = http_client or HttpClient()
 
     def refresh(self) -> None:
         if self.config.app.demo_mode and not self.config.weather.enabled:
@@ -78,15 +83,16 @@ class OpenMeteoProvider(BaseProvider):
                     "forecast_days": 3,
                 }
             )
-            request = urllib_request.Request(
+            response = self._http.get(
                 f"https://api.open-meteo.com/v1/forecast?{params}",
-                headers={"User-Agent": "pi-hub-smart-display/0.1"},
+                timeout=self.config.weather.timeout_seconds,
             )
-            with urllib_request.urlopen(
-                request, timeout=self.config.weather.timeout_seconds
-            ) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (urllib_error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            if not response.ok:
+                raise HttpError(
+                    f"Open-Meteo antwortete mit {response.status}"
+                )
+            payload = response.json()
+        except (HttpError, ValueError, json.JSONDecodeError, OSError) as exc:
             self.logger.warning("weather fetch failed: %s", exc)
             self.state_store.mark_error(
                 self.section_name,

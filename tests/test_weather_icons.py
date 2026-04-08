@@ -4,13 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from smart_display.http_client import HttpError
 from smart_display.providers._parsing import safe_float, safe_get, safe_index, safe_int
 from smart_display.providers.weather_openmeteo import (
     OpenMeteoProvider,
     _short_day_label,
     weather_icon_key,
 )
-from tests._support import make_app_config, make_state_store
+from tests._support import FakeHttpClient, make_app_config, make_state_store
 
 
 class WeatherIconTest(unittest.TestCase):
@@ -143,6 +144,104 @@ class OpenMeteoPayloadRobustnessTest(unittest.TestCase):
         # catch is there for.
         with self.assertRaises(TypeError):
             self.provider._build_state_from_payload({})
+
+
+class OpenMeteoHttpClientRefreshTest(unittest.TestCase):
+    """Plan B16: ``OpenMeteoProvider`` must drive all traffic through the
+    injected HttpClient so tests never touch the network."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp = Path(self._tmp.name)
+        self.config = make_app_config(tmp, weather_enabled=True)
+        self.store = make_state_store(tmp, weather_enabled=True)
+        self.http = FakeHttpClient()
+
+    def _build_url(self) -> str:
+        # The provider URL-encodes params in a deterministic order —
+        # re-build the same URL here so we can pre-seed a response.
+        from urllib.parse import urlencode
+
+        params = urlencode(
+            {
+                "latitude": self.config.weather.latitude,
+                "longitude": self.config.weather.longitude,
+                "current": "temperature_2m,apparent_temperature,weather_code",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                "timezone": self.config.app.timezone,
+                "forecast_days": 3,
+            }
+        )
+        return f"https://api.open-meteo.com/v1/forecast?{params}"
+
+    def test_successful_refresh_writes_state(self) -> None:
+        self.http.add_response(
+            "GET",
+            self._build_url(),
+            status=200,
+            body={
+                "current": {
+                    "weather_code": 1,
+                    "temperature_2m": 11.2,
+                    "apparent_temperature": 10.0,
+                },
+                "daily": {
+                    "time": ["2026-04-08", "2026-04-09", "2026-04-10"],
+                    "weather_code": [1, 2, 3],
+                    "temperature_2m_max": [12, 13, 14],
+                    "temperature_2m_min": [5, 6, 7],
+                },
+            },
+        )
+        provider = OpenMeteoProvider(self.config, self.store, http_client=self.http)
+        provider.refresh()
+        state = self.store.get_state().weather
+        self.assertEqual(state.snapshot.status, "ok")
+        self.assertEqual(state.condition_code, 1)
+        self.assertEqual(len(state.forecast), 3)
+        self.assertEqual(len(self.http.calls), 1)
+
+    def test_non_2xx_response_marks_error(self) -> None:
+        # Prime the store with a successful fetch so we can observe the
+        # ok → stale transition on the subsequent 503.
+        self.http.queue(
+            "GET",
+            self._build_url(),
+            status=200,
+            body={
+                "current": {"weather_code": 0, "temperature_2m": 5},
+                "daily": {
+                    "time": ["2026-04-08"],
+                    "weather_code": [0],
+                    "temperature_2m_max": [6],
+                    "temperature_2m_min": [1],
+                },
+            },
+        )
+        self.http.queue("GET", self._build_url(), status=503, body=b"")
+        provider = OpenMeteoProvider(self.config, self.store, http_client=self.http)
+        provider.refresh()
+        self.assertEqual(self.store.get_state().weather.snapshot.status, "ok")
+        provider.refresh()
+        snapshot = self.store.get_state().weather.snapshot
+        self.assertIn(snapshot.status, {"stale", "error"})
+        self.assertIn("503", snapshot.error_message or "")
+
+    def test_http_error_marks_error(self) -> None:
+        self.http.add_error(
+            "GET",
+            self._build_url(),
+            HttpError("connection refused"),
+        )
+        provider = OpenMeteoProvider(self.config, self.store, http_client=self.http)
+        provider.refresh()
+        snapshot = self.store.get_state().weather.snapshot
+        # Plan B4: a fresh store starts in ``empty``, which mark_error keeps
+        # as ``empty``. The error_message is still populated so the UI can
+        # surface the reason.
+        self.assertIn(snapshot.status, {"empty", "error"})
+        self.assertIn("connection refused", snapshot.error_message or "")
 
 
 if __name__ == "__main__":
