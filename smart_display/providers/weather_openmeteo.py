@@ -8,6 +8,12 @@ from urllib import request as urllib_request
 
 from smart_display.config import AppConfig
 from smart_display.models import WeatherForecastItem, WeatherState
+from smart_display.providers._parsing import (
+    safe_float,
+    safe_get,
+    safe_index,
+    safe_int,
+)
 from smart_display.providers.base import BaseProvider
 from smart_display.state_store import StateStore
 
@@ -80,8 +86,8 @@ class OpenMeteoProvider(BaseProvider):
                 request, timeout=self.config.weather.timeout_seconds
             ) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (urllib_error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            self.logger.exception("weather refresh failed")
+        except (urllib_error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            self.logger.warning("weather fetch failed: %s", exc)
             self.state_store.mark_error(
                 self.section_name,
                 error_message=str(exc),
@@ -90,36 +96,55 @@ class OpenMeteoProvider(BaseProvider):
             )
             return
 
-        current = payload.get("current", {})
-        daily = payload.get("daily", {})
-        forecast: list[WeatherForecastItem] = []
-        dates = daily.get("time", [])
-        codes = daily.get("weather_code", [])
-        max_values = daily.get("temperature_2m_max", [])
-        min_values = daily.get("temperature_2m_min", [])
-        for index, day_label in enumerate(dates):
-            code = int(codes[index])
-            forecast.append(
-                WeatherForecastItem(
-                    day_label=_short_day_label(index, day_label),
-                    condition=WEATHER_CODES.get(code, "Unbekannt"),
-                    condition_code=code,
-                    temperature_max_c=max_values[index],
-                    temperature_min_c=min_values[index],
-                )
+        try:
+            state = self._build_state_from_payload(payload)
+        except Exception as exc:  # noqa: BLE001 — surface any parse drift
+            self.logger.warning("weather payload parse failed: %s", exc)
+            self.state_store.mark_error(
+                self.section_name,
+                error_message=f"Ungültige Wetter-Antwort: {exc}",
+                stale_after_seconds=self.refresh_interval_seconds * 2,
+                source=self.source_name,
             )
+            return
 
-        current_code = int(current.get("weather_code", -1))
-        state = WeatherState(
+        self.state_store.update_section(self.section_name, state)
+
+    def _build_state_from_payload(self, payload: dict) -> WeatherState:
+        """Plan B13: build a WeatherState tolerantly. Missing or malformed
+        sub-fields degrade gracefully instead of crashing the refresh."""
+        current_code = safe_int(safe_get(payload, "current", "weather_code"))
+        temperature = safe_float(safe_get(payload, "current", "temperature_2m"))
+        apparent = safe_float(safe_get(payload, "current", "apparent_temperature"))
+
+        dates = safe_get(payload, "daily", "time", default=[]) or []
+        codes = safe_get(payload, "daily", "weather_code", default=[]) or []
+        max_values = safe_get(payload, "daily", "temperature_2m_max", default=[]) or []
+        min_values = safe_get(payload, "daily", "temperature_2m_min", default=[]) or []
+
+        forecast: list[WeatherForecastItem] = []
+        if isinstance(dates, list):
+            for index, day_label in enumerate(dates):
+                code = safe_int(safe_index(codes, index))
+                forecast.append(
+                    WeatherForecastItem(
+                        day_label=_short_day_label(index, str(day_label)),
+                        condition=WEATHER_CODES.get(code, "Unbekannt") if code is not None else "Unbekannt",
+                        condition_code=code,
+                        temperature_max_c=safe_float(safe_index(max_values, index)),
+                        temperature_min_c=safe_float(safe_index(min_values, index)),
+                    )
+                )
+
+        return WeatherState(
             snapshot=self.snapshot(status="ok"),
             location_label=self.config.weather.label,
-            temperature_c=current.get("temperature_2m"),
-            apparent_temperature_c=current.get("apparent_temperature"),
-            condition=WEATHER_CODES.get(current_code, "Unbekannt"),
+            temperature_c=temperature,
+            apparent_temperature_c=apparent,
+            condition=WEATHER_CODES.get(current_code, "Unbekannt") if current_code is not None else "Unbekannt",
             condition_code=current_code,
             forecast=forecast,
         )
-        self.state_store.update_section(self.section_name, state)
 
 
 def _short_day_label(index: int, raw_label: str) -> str:
