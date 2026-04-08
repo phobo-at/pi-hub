@@ -66,16 +66,6 @@ def day_key_for_offset(offset: int) -> str:
     return f"day_{offset}"
 
 
-def day_label_for_offset(offset: int, current_date: date) -> str:
-    if offset == 0:
-        return "Heute"
-    if offset == 1:
-        return "Morgen"
-    if offset == 2:
-        return "Übermorgen"
-    return current_date.strftime("%A")
-
-
 def build_calendar_sections(
     items: list[CalendarEventItem],
     *,
@@ -83,6 +73,13 @@ def build_calendar_sections(
     base_date: date,
     days: int = 3,
 ) -> list[CalendarDaySection]:
+    """Group events into per-day sections, emitting only the ISO section_date.
+
+    Day labels ("Heute"/"Morgen"/…) are deliberately NOT baked in here — the
+    client computes them from section_date against its own "today" so the UI
+    stays correct across midnight without a server refresh. See
+    ``smart_display/calendar_layout.compute_day_label``.
+    """
     zone = ZoneInfo(timezone_name)
     buckets: dict[date, list[CalendarEventItem]] = {
         base_date + timedelta(days=offset): [] for offset in range(days)
@@ -114,7 +111,7 @@ def build_calendar_sections(
         sections.append(
             CalendarDaySection(
                 day_key=day_key_for_offset(offset),
-                day_label=day_label_for_offset(offset, current_date),
+                section_date=current_date.isoformat(),
                 items=section_items,
             )
         )

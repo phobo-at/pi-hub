@@ -73,7 +73,11 @@ class CalendarFormattingTest(unittest.TestCase):
             days=3,
         )
 
-        self.assertEqual([section.day_label for section in sections], ["Heute", "Morgen", "Übermorgen"])
+        self.assertEqual(
+            [section.section_date for section in sections],
+            ["2026-04-08", "2026-04-09", "2026-04-10"],
+        )
+        self.assertEqual([section.day_key for section in sections], ["today", "tomorrow", "day_after_tomorrow"])
         self.assertEqual([section.items[0].title for section in sections], ["Heute", "Morgen", "Übermorgen"])
 
 

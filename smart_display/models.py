@@ -143,13 +143,13 @@ class CalendarEventItem:
 @dataclass(slots=True)
 class CalendarDaySection:
     day_key: str
-    day_label: str
+    section_date: str  # ISO date, e.g. "2026-04-08" — client computes the label
     items: list[CalendarEventItem] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "day_key": self.day_key,
-            "day_label": self.day_label,
+            "section_date": self.section_date,
             "items": [item.to_dict() for item in self.items],
         }
 
@@ -157,7 +157,7 @@ class CalendarDaySection:
     def from_dict(cls, data: dict[str, Any]) -> "CalendarDaySection":
         return cls(
             day_key=str(data.get("day_key", "")),
-            day_label=str(data.get("day_label", "")),
+            section_date=str(data.get("section_date", "")),
             items=[
                 CalendarEventItem.from_dict(item)
                 for item in data.get("items", []) or []
