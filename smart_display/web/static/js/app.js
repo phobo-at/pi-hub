@@ -24,6 +24,25 @@
     day: "2-digit",
     timeZone: TIMEZONE,
   });
+  // Plan B5: the old updateClock allocated three Intl formatters per second
+  // on a Pi Zero 2 W. Cache them once and drive the tick by a
+  // setTimeout-to-next-minute so the idle CPU is closer to 0 %.
+  const CLOCK_TIME_FMT = new Intl.DateTimeFormat(LOCALE, {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: TIMEZONE,
+  });
+  const CLOCK_DATE_FMT = new Intl.DateTimeFormat(LOCALE, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: TIMEZONE,
+  });
+  const CLOCK_TZ_FMT = new Intl.DateTimeFormat(LOCALE, {
+    timeZone: TIMEZONE,
+    timeZoneName: "longGeneric",
+  });
+  let clockTimer = null;
 
   const nodes = {
     time: document.getElementById("clock-time"),
@@ -167,31 +186,28 @@
 
   function updateClock() {
     const now = new Date();
-    const timezone = config.timezone || "Europe/Vienna";
-    const locale = config.locale || "de-AT";
-    const timeFormatter = new Intl.DateTimeFormat(config.locale || "de-AT", {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: timezone,
-    });
-    const dateFormatter = new Intl.DateTimeFormat(config.locale || "de-AT", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      timeZone: timezone,
-    });
-    const timezoneFormatter = new Intl.DateTimeFormat(locale, {
-      timeZone: timezone,
-      timeZoneName: "longGeneric",
-    });
-    const timeValue = timeFormatter.format(now);
+    const timeValue = CLOCK_TIME_FMT.format(now);
     nodes.time.textContent = timeValue;
-    nodes.date.textContent = dateFormatter.format(now);
+    nodes.date.textContent = CLOCK_DATE_FMT.format(now);
     nodes.screensaverClock.textContent = timeValue;
     const timezoneName =
-      timezoneFormatter.formatToParts(now).find((part) => part.type === "timeZoneName")
-        ?.value || timezone;
+      CLOCK_TZ_FMT.formatToParts(now).find((part) => part.type === "timeZoneName")
+        ?.value || TIMEZONE;
     nodes.heroLocale.textContent = timezoneName;
+  }
+
+  function scheduleClockTick() {
+    // Re-arm for the next minute boundary + 500 ms safety margin so a slow
+    // tick never lands in the previous minute. Clamp to at least 1 s to
+    // avoid a runaway loop if the host clock misbehaves.
+    const now = Date.now();
+    const msUntilNextMinute = 60_000 - (now % 60_000);
+    const delay = Math.max(1_000, msUntilNextMinute + 500);
+    window.clearTimeout(clockTimer);
+    clockTimer = window.setTimeout(() => {
+      updateClock();
+      scheduleClockTick();
+    }, delay);
   }
 
   function setStatus(node, snapshot) {
@@ -732,7 +748,11 @@
   }
 
   function bindEvents() {
-    ["pointerdown", "pointermove", "touchstart", "keydown"].forEach((eventName) => {
+    // Plan B6: pointermove fired on every pixel of cursor motion during
+    // debug sessions and on the kiosk itself whenever a touch was dragged,
+    // which was pure CPU noise — pointerdown/touchstart already cover real
+    // interaction.
+    ["pointerdown", "touchstart", "keydown"].forEach((eventName) => {
       window.addEventListener(eventName, handleActivity, { passive: true });
     });
 
@@ -811,7 +831,7 @@
   schedulePolling();
   scheduleMidnightRerender();
   resetIdleTimer();
-  window.setInterval(updateClock, 1000);
+  scheduleClockTick();
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => render(state));
   }
