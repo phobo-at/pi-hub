@@ -115,7 +115,19 @@ def serve_app(app: Flask) -> None:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("waitress is required to run the production server.") from exc
 
-    serve(app, host=config.app.host, port=config.app.port)
+    # Plan B10: force the bind to loopback no matter what the config file
+    # says. The POST endpoints are already guarded by ``local_only``, but
+    # keeping Waitress off ``0.0.0.0`` prevents the device from becoming a
+    # LAN-reachable controller even in the face of a mistake in
+    # ``config/default.yaml`` or an env override.
+    host = config.app.host or "127.0.0.1"
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        logging.getLogger(__name__).warning(
+            "forcing Waitress bind to 127.0.0.1 (configured host %r is not loopback)",
+            host,
+        )
+        host = "127.0.0.1"
+    serve(app, host=host, port=config.app.port)
 
 
 def _configure_logging(config: AppConfig) -> None:

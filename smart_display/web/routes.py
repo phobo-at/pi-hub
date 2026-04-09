@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 
 from smart_display.i18n import format_initial_clock
 from smart_display.models import PhotoManifestEntry
+from smart_display.web.origin_guard import local_only
 
 
 def create_blueprint() -> Blueprint:
@@ -54,6 +55,7 @@ def create_blueprint() -> Blueprint:
         return jsonify({"image": entry.to_dict()})
 
     @blueprint.post("/api/screensaver/state")
+    @local_only
     def screensaver_state():
         """Plan B1: the frontend tells us when the screensaver is visible so
         we can pause the Spotify polling group. Saves one request every 30 s
@@ -67,21 +69,25 @@ def create_blueprint() -> Blueprint:
         return jsonify({"ok": True, "active": active})
 
     @blueprint.post("/api/spotify/toggle")
+    @local_only
     def spotify_toggle():
         services = current_app.extensions["smart_display"]
         return jsonify(services["spotify_provider"].toggle_playback())
 
     @blueprint.post("/api/spotify/next")
+    @local_only
     def spotify_next():
         services = current_app.extensions["smart_display"]
         return jsonify(services["spotify_provider"].next_track())
 
     @blueprint.post("/api/spotify/previous")
+    @local_only
     def spotify_previous():
         services = current_app.extensions["smart_display"]
         return jsonify(services["spotify_provider"].previous_track())
 
     @blueprint.post("/api/spotify/volume")
+    @local_only
     def spotify_volume():
         services = current_app.extensions["smart_display"]
         payload = request.get_json(silent=True) or {}

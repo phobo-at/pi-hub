@@ -4,8 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from flask import Flask
+
 from smart_display.config import load_config
 from smart_display.local_server import _load_local_env
+from smart_display.web.routes import create_blueprint
+from tests._support import make_app_config, make_state_store
 
 
 class LocalServerTest(unittest.TestCase):
@@ -62,6 +66,148 @@ class LocalServerTest(unittest.TestCase):
 
             self.assertEqual(env["APP_PORT"], "8091")
             self.assertEqual(env["APP_HOST"], "127.0.0.1")
+
+
+class _StubScheduler:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool]] = []
+
+    def set_paused(self, group: str, paused: bool) -> None:
+        self.calls.append((group, paused))
+
+
+class _StubSpotifyProvider:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def toggle_playback(self) -> dict:
+        self.calls.append("toggle")
+        return {"ok": True, "state": None}
+
+    def next_track(self) -> dict:
+        self.calls.append("next")
+        return {"ok": True, "state": None}
+
+    def previous_track(self) -> dict:
+        self.calls.append("previous")
+        return {"ok": True, "state": None}
+
+    def set_volume(self, percent: int) -> dict:
+        self.calls.append(f"volume:{percent}")
+        return {"ok": True, "state": None}
+
+
+class LoopbackOnlyPostsTest(unittest.TestCase):
+    """Plan B10: POST endpoints must only accept loopback callers. The
+    kiosk browser talks to 127.0.0.1:8080 so a LAN client or a malicious
+    cross-origin page must be rejected even if Waitress is ever mis-bound."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        tmp = Path(self._tmp.name)
+
+        self.config = make_app_config(tmp)
+        self.state_store = make_state_store(tmp)
+        self.scheduler = _StubScheduler()
+        self.spotify = _StubSpotifyProvider()
+
+        app = Flask(
+            __name__,
+            template_folder=str(
+                Path(__file__).parent.parent
+                / "smart_display"
+                / "web"
+                / "templates"
+            ),
+        )
+        app.extensions["smart_display"] = {
+            "config": self.config,
+            "state_store": self.state_store,
+            "scheduler": self.scheduler,
+            "spotify_provider": self.spotify,
+        }
+        app.register_blueprint(create_blueprint())
+        self.app = app
+        self.client = app.test_client()
+
+    def _post(self, path: str, *, remote: str = "127.0.0.1", **kwargs):
+        return self.client.post(
+            path,
+            environ_overrides={"REMOTE_ADDR": remote},
+            **kwargs,
+        )
+
+    def test_post_accepts_loopback(self) -> None:
+        response = self._post("/api/spotify/toggle")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.spotify.calls, ["toggle"])
+
+    def test_post_rejects_non_loopback_remote_addr(self) -> None:
+        response = self._post("/api/spotify/toggle", remote="192.168.1.5")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.spotify.calls, [])
+        body = response.get_json()
+        self.assertIsNotNone(body)
+        self.assertFalse(body["ok"])
+        self.assertIn("lokal", body["message"].lower())
+
+    def test_post_rejects_cross_origin_header(self) -> None:
+        response = self._post(
+            "/api/spotify/toggle",
+            headers={"Origin": "http://evil.example.com"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.spotify.calls, [])
+
+    def test_post_accepts_loopback_origin_header(self) -> None:
+        response = self._post(
+            "/api/spotify/toggle",
+            headers={"Origin": "http://127.0.0.1:8080"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.spotify.calls, ["toggle"])
+
+    def test_post_accepts_localhost_origin(self) -> None:
+        response = self._post(
+            "/api/spotify/toggle",
+            headers={"Origin": "http://localhost:8080"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_post_rejects_cross_origin_referer(self) -> None:
+        response = self._post(
+            "/api/spotify/next",
+            headers={"Referer": "https://attacker.test/page"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_screensaver_state_also_guarded(self) -> None:
+        response = self._post(
+            "/api/screensaver/state",
+            json={"active": True},
+            remote="10.0.0.4",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.scheduler.calls, [])
+
+    def test_spotify_volume_guarded(self) -> None:
+        response = self._post(
+            "/api/spotify/volume",
+            json={"volume_percent": 50},
+            remote="10.0.0.4",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.spotify.calls, [])
+
+    def test_get_state_unaffected_by_guard(self) -> None:
+        # GETs are not guarded at the decorator level — Waitress is already
+        # pinned to loopback and the kiosk needs to read state.
+        response = self.client.get(
+            "/api/state",
+            environ_overrides={"REMOTE_ADDR": "192.168.1.5"},
+        )
+        self.assertEqual(response.status_code, 200)
 
 
 if __name__ == "__main__":
