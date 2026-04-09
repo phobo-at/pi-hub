@@ -70,6 +70,11 @@ class ImageCache:
         self._clock = clock or time.time
         self._entries = self._load_manifest()
         self._failures: dict[str, dict[str, Any]] = self._load_failures()
+        # Plan hardening: only persist ``failed.json`` when something
+        # actually changed during ``sync_remote_images``. On a Pi Zero
+        # writing the file every refresh tick is pointless churn against
+        # the SD card when the typical case is "nothing failed".
+        self._failures_dirty = False
         # Plan C2: caching the demo-entries list avoids re-walking the demo
         # directory every slideshow tick (≤15 s on the Pi). Invalidate via
         # manifest mtime so edits still land on the next call.
@@ -149,7 +154,9 @@ class ImageCache:
         self._entries = next_entries
         self._cleanup_unused_files(used_filenames)
         self.manifest_cache.save([entry.to_dict() for entry in self._entries])
-        self.failures_cache.save(self._failures)
+        if self._failures_dirty:
+            self.failures_cache.save(self._failures)
+            self._failures_dirty = False
         return self.entries()
 
     def next_entry(self, *, include_demo: bool = True) -> PhotoManifestEntry | None:
@@ -228,6 +235,7 @@ class ImageCache:
             ).isoformat(),
             "last_error": f"{type(exc).__name__}: {exc}",
         }
+        self._failures_dirty = True
         logger.warning(
             "screensaver image download failed for %s (attempt %d, retry in %.0fs): %s",
             url,
@@ -237,12 +245,15 @@ class ImageCache:
         )
 
     def _clear_failure(self, url: str) -> None:
-        self._failures.pop(url, None)
+        if self._failures.pop(url, None) is not None:
+            self._failures_dirty = True
 
     def _prune_failures(self, live_urls: set[str]) -> None:
         stale = [url for url in self._failures if url not in live_urls]
         for url in stale:
             self._failures.pop(url, None)
+        if stale:
+            self._failures_dirty = True
 
     def _load_failures(self) -> dict[str, dict[str, Any]]:
         raw = self.failures_cache.load()

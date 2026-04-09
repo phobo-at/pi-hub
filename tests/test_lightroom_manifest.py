@@ -390,5 +390,85 @@ class DemoEntriesCacheTest(unittest.TestCase):
         self.assertEqual(cache.demo_entries(), [])
 
 
+class FailuresWriteOnChangeTest(unittest.TestCase):
+    """``failed.json`` is persisted on every ``sync_remote_images`` call,
+    but in the happy path (all URLs already cached, nothing failed) there
+    is nothing to persist. Writing the file anyway burns SD-card cycles on
+    the Pi Zero for no benefit. The cache must only write when the
+    failures dict actually changed during the call."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def _make_cache(self, downloader):
+        cache = ImageCache(
+            cache_dir=self.tmp / "screensaver",
+            manifest_path=self.tmp / "screensaver" / "manifest.json",
+            downloader=downloader,
+        )
+        # Count every failures_cache.save() call so tests can assert
+        # nothing touched the file between two no-op syncs.
+        self._save_calls = 0
+        original_save = cache.failures_cache.save
+
+        def counting_save(data):
+            self._save_calls += 1
+            return original_save(data)
+
+        cache.failures_cache.save = counting_save  # type: ignore[assignment]
+        return cache
+
+    def test_no_write_when_nothing_changed(self) -> None:
+        payload = _synthetic_jpeg(100, 100)
+
+        def ok_downloader(url: str, timeout_seconds: int):
+            return payload, {}
+
+        cache = self._make_cache(ok_downloader)
+
+        # First sync downloads and produces 1 entry, no failures.
+        cache.sync_remote_images(
+            ["https://example.com/ok.jpg"], timeout_seconds=5
+        )
+        saves_after_first = self._save_calls
+
+        # Second sync: same URL, already cached, no new work. Failures
+        # dict is unchanged (still empty) — must not touch disk.
+        cache.sync_remote_images(
+            ["https://example.com/ok.jpg"], timeout_seconds=5
+        )
+        self.assertEqual(
+            self._save_calls,
+            saves_after_first,
+            "failures file must not be rewritten when nothing changed",
+        )
+
+    def test_write_when_new_failure_recorded(self) -> None:
+        def bad_downloader(url: str, timeout_seconds: int):
+            return b"not an image", {}
+
+        cache = self._make_cache(bad_downloader)
+        cache.sync_remote_images(
+            ["https://example.com/bad.jpg"], timeout_seconds=5
+        )
+        self.assertGreaterEqual(self._save_calls, 1)
+
+    def test_write_when_failure_pruned(self) -> None:
+        def bad_downloader(url: str, timeout_seconds: int):
+            return b"not an image", {}
+
+        cache = self._make_cache(bad_downloader)
+        cache.sync_remote_images(
+            ["https://example.com/gone.jpg"], timeout_seconds=5
+        )
+        saves_after_fail = self._save_calls
+
+        # Remove URL from source list → pruning must dirty the cache.
+        cache.sync_remote_images([], timeout_seconds=5)
+        self.assertGreater(self._save_calls, saves_after_fail)
+
+
 if __name__ == "__main__":
     unittest.main()
