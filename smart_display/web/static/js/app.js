@@ -73,7 +73,10 @@
     spotifyNextIcon: document.getElementById("spotify-next-icon"),
     spotifyVolume: document.getElementById("spotify-volume"),
     screensaver: document.getElementById("screensaver"),
-    screensaverImage: document.getElementById("screensaver-image"),
+    // Plan C1: two stacked image slots for crossfade. The active one is
+    // visible; the inactive one holds the next image preloaded at opacity 0.
+    screensaverImageA: document.getElementById("screensaver-image-a"),
+    screensaverImageB: document.getElementById("screensaver-image-b"),
     screensaverFallback: document.getElementById("screensaver-fallback"),
     screensaverClock: document.getElementById("screensaver-clock"),
     toast: document.getElementById("toast"),
@@ -661,30 +664,80 @@
     renderSpotify(spotifyState);
   }
 
-  async function loadScreensaverImage() {
+  // Plan C1: crossfade state. ``activeSlot`` is the <img> currently visible;
+  // the next fetch writes into the hidden slot, waits for its ``load`` event,
+  // then toggles the ``is-active`` class to trigger the CSS opacity swap.
+  // We intentionally do NOT preload "the next next image" because
+  // /api/screensaver/next returns a *random* manifest entry on every call,
+  // so a speculative pre-fetch rarely matches what the next advance picks.
+  let activeScreensaverSlot = null;
+
+  async function fetchNextScreensaverImage() {
     try {
       const response = await fetch("/api/screensaver/next", { cache: "no-store" });
       if (!response.ok) {
-        showScreensaverFallback();
-        return;
+        return null;
       }
       const payload = await response.json();
-      if (!payload.image) {
-        showScreensaverFallback();
-        return;
-      }
-      nodes.screensaverImage.src = payload.image.public_path;
-      nodes.screensaverImage.style.display = "block";
-      nodes.screensaverFallback.style.display = "none";
+      return payload && payload.image ? payload.image : null;
     } catch (error) {
-      window.console.debug("screensaver image failed", error);
-      showScreensaverFallback();
+      window.console.debug("screensaver image fetch failed", error);
+      return null;
     }
   }
 
+  function loadImageInSlot(slot, src) {
+    return new Promise((resolve) => {
+      const onLoad = () => {
+        slot.removeEventListener("load", onLoad);
+        slot.removeEventListener("error", onError);
+        resolve(true);
+      };
+      const onError = () => {
+        slot.removeEventListener("load", onLoad);
+        slot.removeEventListener("error", onError);
+        resolve(false);
+      };
+      slot.addEventListener("load", onLoad);
+      slot.addEventListener("error", onError);
+      slot.src = src;
+    });
+  }
+
+  async function loadScreensaverImage() {
+    const image = await fetchNextScreensaverImage();
+    if (!image) {
+      showScreensaverFallback();
+      return;
+    }
+    if (!activeScreensaverSlot) {
+      activeScreensaverSlot = nodes.screensaverImageA;
+    }
+    const nextSlot =
+      activeScreensaverSlot === nodes.screensaverImageA
+        ? nodes.screensaverImageB
+        : nodes.screensaverImageA;
+
+    const loaded = await loadImageInSlot(nextSlot, image.public_path);
+    if (!loaded) {
+      // Leave the current slot visible; a failure must not blank the panel.
+      return;
+    }
+
+    // Swap visibility: activate the freshly loaded slot and retire the old
+    // one. CSS handles the 1.2 s crossfade.
+    nextSlot.classList.add("is-active");
+    activeScreensaverSlot.classList.remove("is-active");
+    activeScreensaverSlot = nextSlot;
+    nodes.screensaverFallback.style.display = "none";
+  }
+
   function showScreensaverFallback() {
-    nodes.screensaverImage.removeAttribute("src");
-    nodes.screensaverImage.style.display = "none";
+    [nodes.screensaverImageA, nodes.screensaverImageB].forEach((slot) => {
+      slot.removeAttribute("src");
+      slot.classList.remove("is-active");
+    });
+    activeScreensaverSlot = null;
     nodes.screensaverFallback.style.display = "flex";
   }
 

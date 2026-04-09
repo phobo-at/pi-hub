@@ -873,10 +873,27 @@ body {
   inset: 0;
 }
 
+/* Plan C1: two stacked slots crossfade between photos. Only the slot with
+   ``is-active`` is visible; the other preloads the next image at 0 opacity.
+   1.2 s ease gives the living-room panel a calm handover without hiding
+   decode glitches. prefers-reduced-motion disables the transition. */
 .screensaver__image {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  will-change: opacity;
+}
+
+.screensaver__image.is-active {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screensaver__image {
+    transition: none;
+  }
 }
 
 .screensaver__overlay {
