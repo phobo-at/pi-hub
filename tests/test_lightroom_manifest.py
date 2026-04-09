@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,27 @@ from smart_display.providers.lightroom_source import extract_image_urls
 SAMPLE_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z4xQAAAAASUVORK5CYII="
 )
+
+
+def _synthetic_jpeg(width: int, height: int) -> bytes:
+    """Render a real JPEG of the requested size so the Pillow pipeline gets
+    exercised with non-trivial data (LANCZOS fit, exif_transpose, re-encode).
+
+    Uses a simple gradient + two solid blocks so the output is clearly
+    distinguishable from a blank or a 1x1 placeholder.
+    """
+    from PIL import Image as _Image  # type: ignore
+
+    image = _Image.new("RGB", (width, height), color=(48, 96, 192))
+    # Draw a high-frequency pattern so LANCZOS resampling has something real
+    # to filter — otherwise the codec might degenerate to a trivial entropy.
+    pixels = image.load()
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = ((x * 7) % 256, (y * 11) % 256, ((x + y) * 3) % 256)
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=82)
+    return buffer.getvalue()
 
 
 class LightroomManifestTest(unittest.TestCase):
@@ -215,6 +237,85 @@ class RetryBackoffMathTest(unittest.TestCase):
     def test_backoff_caps_at_24h(self) -> None:
         # 60 * 2^20 is way past 24 h — must clamp.
         self.assertEqual(_compute_next_retry(20), _MAX_BACKOFF_SECONDS)
+
+
+class PillowPipelineRealBytesTest(unittest.TestCase):
+    """Exercise the actual Pillow pipeline — exif_transpose, LANCZOS fit,
+    JPEG re-encode — with a non-trivial bitmap. Previous coverage only used
+    a 1x1 placeholder which skipped the resize codepath entirely.
+
+    These are the steps the Pi Zero actually runs on every new album photo,
+    so if the code path is broken we want to know before the hardware does.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+
+    def _make_cache(self, payload: bytes) -> ImageCache:
+        def fake_downloader(url: str, timeout_seconds: int):
+            return payload, {}
+
+        return ImageCache(
+            cache_dir=self.tmp / "screensaver",
+            manifest_path=self.tmp / "screensaver" / "manifest.json",
+            downloader=fake_downloader,
+        )
+
+    def test_oversized_jpeg_is_fit_to_display_size(self) -> None:
+        # Typical Lightroom export: 2400x1600 landscape.
+        payload = _synthetic_jpeg(2400, 1600)
+        cache = self._make_cache(payload)
+        entries = cache.sync_remote_images(
+            ["https://example.com/big.jpg"], timeout_seconds=5
+        )
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry.width, 1024)
+        self.assertEqual(entry.height, 600)
+        # The cached file exists and is a valid JPEG that Pillow can re-open.
+        from PIL import Image as _Image  # type: ignore
+
+        with _Image.open(entry.local_path) as reopened:
+            self.assertEqual(reopened.size, (1024, 600))
+            self.assertEqual(reopened.format, "JPEG")
+
+    def test_portrait_jpeg_is_cover_fit(self) -> None:
+        # Portrait photo: Pillow's ImageOps.fit crops to cover, so the final
+        # aspect must still be 1024x600.
+        payload = _synthetic_jpeg(1200, 1800)
+        cache = self._make_cache(payload)
+        entries = cache.sync_remote_images(
+            ["https://example.com/portrait.jpg"], timeout_seconds=5
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].width, 1024)
+        self.assertEqual(entries[0].height, 600)
+
+    def test_small_jpeg_is_upscaled_to_display(self) -> None:
+        # Tiny thumbnail: fit() still normalises dimensions, even if the
+        # resulting quality is ugly. Important property: no crash.
+        payload = _synthetic_jpeg(320, 240)
+        cache = self._make_cache(payload)
+        entries = cache.sync_remote_images(
+            ["https://example.com/thumb.jpg"], timeout_seconds=5
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].width, 1024)
+        self.assertEqual(entries[0].height, 600)
+
+    def test_encoded_output_is_bounded(self) -> None:
+        # Sanity: after quality=86 re-encode the on-disk file must be
+        # smaller than the IMAGE_MAX_BYTES cap (8 MB). A 2400x1600 random
+        # pattern is a pessimistic case for JPEG compression.
+        payload = _synthetic_jpeg(2400, 1600)
+        cache = self._make_cache(payload)
+        entries = cache.sync_remote_images(
+            ["https://example.com/pattern.jpg"], timeout_seconds=5
+        )
+        size = Path(entries[0].local_path).stat().st_size
+        self.assertLess(size, 1_500_000, f"expected <1.5 MB, got {size}")
 
 
 class DemoEntriesCacheTest(unittest.TestCase):
