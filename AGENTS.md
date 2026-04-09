@@ -40,7 +40,7 @@ Wenn du eine Änderung planst, die diese Leitplanken verletzt, brauchst du eine 
 
 Die aktuelle Zielhierarchie ist:
 
-- links: Uhrzeit, Datum, lokalisierte Zeitzone, Wetter mit kompakter 3-Tages-Vorschau
+- links: Uhrzeit, Datum, Wetter mit kompakter 3-Tages-Vorschau
 - rechts oben: Termine
 - rechts unten: Spotify Wiedergabe
 
