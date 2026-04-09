@@ -8,6 +8,12 @@
   let slideshowTimer = null;
   let resizeTimer = null;
   let midnightTimer = null;
+  // Plan B1 watchdog: while the screensaver is visible we re-POST
+  // /api/screensaver/state periodically so the backend pause-TTL stays
+  // fresh. If this loop stops firing (tab crash, JS exception), the TTL
+  // expires and Spotify polling resumes on its own.
+  let screensaverHeartbeatTimer = null;
+  const SCREENSAVER_HEARTBEAT_MS = 5 * 60 * 1000;
 
   // Cached Intl formatters. Re-creating them per tick burns measurable CPU
   // on a Pi Zero 2 W; see plan B5. The weekday formatter drives the client-
@@ -770,6 +776,11 @@
       Math.max((config.image_duration_seconds || 15) * 1000, 5000),
     );
     notifyScreensaverState(true);
+    window.clearInterval(screensaverHeartbeatTimer);
+    screensaverHeartbeatTimer = window.setInterval(
+      () => notifyScreensaverState(true),
+      SCREENSAVER_HEARTBEAT_MS,
+    );
   }
 
   function exitScreensaver() {
@@ -779,6 +790,8 @@
     screensaverActive = false;
     nodes.screensaver.classList.remove("is-active");
     window.clearInterval(slideshowTimer);
+    window.clearInterval(screensaverHeartbeatTimer);
+    screensaverHeartbeatTimer = null;
     resetIdleTimer();
     notifyScreensaverState(false);
     fetchState();

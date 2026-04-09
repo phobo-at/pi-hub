@@ -4,7 +4,11 @@ import threading
 import time
 import unittest
 
-from smart_display.scheduler import ScheduledJob, Scheduler
+from smart_display.scheduler import (
+    DEFAULT_PAUSE_TTL_SECONDS,
+    ScheduledJob,
+    Scheduler,
+)
 
 
 class ComputeWaitTest(unittest.TestCase):
@@ -173,6 +177,95 @@ class PauseAndTriggerTest(unittest.TestCase):
             self.assertGreaterEqual(state["count"], 2)
         finally:
             scheduler.stop()
+
+
+class PauseTtlWatchdogTest(unittest.TestCase):
+    """Plan B1 watchdog: the screensaver route pauses the Spotify group with
+    a TTL so a crashed frontend cannot strand the polling forever. These
+    tests inject a monotonic clock to exercise the expiry paths without
+    wall-clock sleeps."""
+
+    def _make_clock(self, start: float = 1000.0):
+        now = {"value": start}
+
+        def monotonic() -> float:
+            return now["value"]
+
+        def advance(delta: float) -> None:
+            now["value"] += delta
+
+        return monotonic, advance
+
+    def test_pause_without_ttl_stays_indefinite(self) -> None:
+        monotonic, advance = self._make_clock()
+        scheduler = Scheduler(monotonic=monotonic)
+        scheduler.set_paused("spotify", True)
+        self.assertTrue(scheduler.is_paused("spotify"))
+        advance(10_000.0)  # far beyond any TTL
+        self.assertTrue(scheduler.is_paused("spotify"))
+
+    def test_pause_with_ttl_auto_resumes_after_expiry(self) -> None:
+        monotonic, advance = self._make_clock()
+        scheduler = Scheduler(monotonic=monotonic)
+        scheduler.set_paused("spotify", True, ttl_seconds=30.0)
+        self.assertTrue(scheduler.is_paused("spotify"))
+        advance(29.0)
+        self.assertTrue(scheduler.is_paused("spotify"))
+        advance(2.0)  # now 31s past the set call
+        self.assertFalse(scheduler.is_paused("spotify"))
+
+    def test_pause_with_ttl_refreshes_on_re_set(self) -> None:
+        monotonic, advance = self._make_clock()
+        scheduler = Scheduler(monotonic=monotonic)
+        scheduler.set_paused("spotify", True, ttl_seconds=30.0)
+        advance(25.0)
+        # Healthy frontend heartbeat — refresh the pause.
+        scheduler.set_paused("spotify", True, ttl_seconds=30.0)
+        advance(20.0)  # 45s after first set, but only 20s after refresh
+        self.assertTrue(scheduler.is_paused("spotify"))
+        advance(15.0)  # 35s after refresh
+        self.assertFalse(scheduler.is_paused("spotify"))
+
+    def test_paused_job_auto_resumes_mid_loop_when_ttl_expires(self) -> None:
+        """End-to-end: a running job whose group was paused with a TTL must
+        start executing again once the TTL lapses, without any explicit
+        resume call. Proves the watchdog path is wired into ``_maybe_execute``
+        and not just ``is_paused``."""
+        monotonic, advance = self._make_clock()
+        scheduler = Scheduler(monotonic=monotonic)
+        state = {"count": 0, "event": threading.Event()}
+
+        def task() -> None:
+            state["count"] += 1
+            state["event"].set()
+
+        job = ScheduledJob(
+            name="spotify",
+            interval_seconds=0.05,
+            task=task,
+            startup_delay_seconds=0.0,
+            jitter_seconds=0.0,
+            pause_group="spotify",
+        )
+        scheduler.set_paused("spotify", True, ttl_seconds=10.0)
+        scheduler.start([job])
+        try:
+            time.sleep(0.15)
+            self.assertEqual(state["count"], 0)
+            # Fast-forward the injected clock past the TTL; the next tick
+            # observes the expiry and runs the task.
+            advance(11.0)
+            self.assertTrue(state["event"].wait(timeout=1.0))
+            self.assertGreaterEqual(state["count"], 1)
+        finally:
+            scheduler.stop()
+
+    def test_default_pause_ttl_is_generous_but_finite(self) -> None:
+        # Guardrail: the constant shared between scheduler and routes must
+        # be large enough to survive one full idle cycle on a sleepy panel
+        # but short enough that a stranded pause self-heals in minutes.
+        self.assertGreaterEqual(DEFAULT_PAUSE_TTL_SECONDS, 300.0)
+        self.assertLessEqual(DEFAULT_PAUSE_TTL_SECONDS, 1800.0)
 
 
 if __name__ == "__main__":

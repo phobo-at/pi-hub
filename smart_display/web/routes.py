@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request, sen
 
 from smart_display.i18n import format_initial_clock
 from smart_display.models import PhotoManifestEntry
+from smart_display.scheduler import DEFAULT_PAUSE_TTL_SECONDS
 from smart_display.web.origin_guard import local_only
 
 
@@ -59,13 +60,24 @@ def create_blueprint() -> Blueprint:
     def screensaver_state():
         """Plan B1: the frontend tells us when the screensaver is visible so
         we can pause the Spotify polling group. Saves one request every 30 s
-        whenever the user is away from the panel."""
+        whenever the user is away from the panel.
+
+        The pause carries a TTL watchdog (``DEFAULT_PAUSE_TTL_SECONDS``) so
+        a crashed frontend cannot strand the Spotify polling forever — the
+        pause self-clears well before anyone notices, and a live frontend
+        refreshes the timer implicitly via its periodic state POSTs.
+        """
         services = current_app.extensions["smart_display"]
         payload = request.get_json(silent=True) or {}
         active = bool(payload.get("active", False))
         scheduler = services.get("scheduler")
         if scheduler is not None:
-            scheduler.set_paused("spotify", active)
+            if active:
+                scheduler.set_paused(
+                    "spotify", True, ttl_seconds=DEFAULT_PAUSE_TTL_SECONDS
+                )
+            else:
+                scheduler.set_paused("spotify", False)
         return jsonify({"ok": True, "active": active})
 
     @blueprint.post("/api/spotify/toggle")

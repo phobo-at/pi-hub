@@ -22,11 +22,20 @@ from __future__ import annotations
 import logging
 import random
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 
 
 logger = logging.getLogger(__name__)
+
+
+# Screensaver-pause watchdog: if the frontend silently dies while the panel
+# is showing the screensaver, we'd otherwise pause Spotify polling forever.
+# The route refreshes this TTL on every state change, so a live frontend
+# never hits the expiry. 10 minutes is well above any reasonable idle cycle
+# and short enough that a crashed UI self-heals before anyone notices.
+DEFAULT_PAUSE_TTL_SECONDS = 600.0
 
 
 @dataclass
@@ -50,13 +59,17 @@ class Scheduler:
         self,
         *,
         rng: Callable[[float, float], float] | None = None,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._stop_event = threading.Event()
         self._threads: list[threading.Thread] = []
         self._jobs: dict[str, _JobState] = {}
-        self._paused_groups: set[str] = set()
+        # ``None`` means "paused indefinitely" (ops / manual); a float is
+        # the monotonic-time expiry after which the pause self-clears.
+        self._paused_groups: dict[str, float | None] = {}
         self._lock = threading.Lock()
         self._rng = rng or random.uniform
+        self._monotonic = monotonic or time.monotonic
 
     def start(self, jobs: list[ScheduledJob]) -> None:
         for job in jobs:
@@ -83,19 +96,36 @@ class Scheduler:
 
     # --- Pause / trigger API ------------------------------------------------
 
-    def set_paused(self, group: str, paused: bool) -> None:
+    def set_paused(
+        self,
+        group: str,
+        paused: bool,
+        *,
+        ttl_seconds: float | None = None,
+    ) -> None:
         """Pause (or resume) all jobs belonging to ``group``.
 
         Paused jobs keep rescheduling on their normal cadence but skip the
         task callable until the group is resumed. Resuming immediately
         triggers a fresh tick for every member of the group so the UI sees
         current data right away.
+
+        ``ttl_seconds`` is the watchdog: a pause with a TTL auto-expires
+        after that many seconds unless refreshed by another call. Without
+        a TTL the pause is indefinite (manual / ops). The screensaver
+        route uses a TTL so a crashed frontend cannot strand the Spotify
+        polling forever.
         """
         with self._lock:
             if paused:
-                self._paused_groups.add(group)
+                expiry: float | None
+                if ttl_seconds is None:
+                    expiry = None
+                else:
+                    expiry = self._monotonic() + float(ttl_seconds)
+                self._paused_groups[group] = expiry
                 return
-            self._paused_groups.discard(group)
+            self._paused_groups.pop(group, None)
             resume_names = [
                 name
                 for name, state in self._jobs.items()
@@ -106,7 +136,22 @@ class Scheduler:
 
     def is_paused(self, group: str) -> bool:
         with self._lock:
-            return group in self._paused_groups
+            return self._group_is_paused_locked(group)
+
+    def _group_is_paused_locked(self, group: str) -> bool:
+        # Caller must hold ``self._lock``. Clears expired TTLs in-place so
+        # a watchdog expiry is observed by the very next check without any
+        # additional plumbing.
+        if group not in self._paused_groups:
+            return False
+        expiry = self._paused_groups[group]
+        if expiry is None:
+            return True
+        if self._monotonic() >= expiry:
+            self._paused_groups.pop(group, None)
+            logger.info("pause group %s auto-resumed after TTL", group)
+            return False
+        return True
 
     def trigger(self, name: str) -> None:
         """Wake the named job so it runs its next tick immediately."""
@@ -151,7 +196,7 @@ class Scheduler:
     def _maybe_execute(self, job: ScheduledJob) -> None:
         if job.pause_group is not None:
             with self._lock:
-                if job.pause_group in self._paused_groups:
+                if self._group_is_paused_locked(job.pause_group):
                     return
         self._execute(job)
 
