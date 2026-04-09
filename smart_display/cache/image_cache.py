@@ -70,6 +70,11 @@ class ImageCache:
         self._clock = clock or time.time
         self._entries = self._load_manifest()
         self._failures: dict[str, dict[str, Any]] = self._load_failures()
+        # Plan C2: caching the demo-entries list avoids re-walking the demo
+        # directory every slideshow tick (≤15 s on the Pi). Invalidate via
+        # manifest mtime so edits still land on the next call.
+        self._demo_entries_cache: list[PhotoManifestEntry] | None = None
+        self._demo_entries_mtime: float | None = None
 
     def entries(self) -> list[PhotoManifestEntry]:
         return list(self._entries)
@@ -156,8 +161,22 @@ class ImageCache:
         return self._random.choice(pool)
 
     def demo_entries(self) -> list[PhotoManifestEntry]:
+        # Plan C2: re-walking the demo directory on every slideshow tick is
+        # wasted syscalls — cache the list and invalidate on demo-dir mtime.
         if not self.demo_dir or not self.demo_dir.exists():
+            self._demo_entries_cache = []
+            self._demo_entries_mtime = None
             return []
+        try:
+            current_mtime = self.demo_dir.stat().st_mtime
+        except OSError:
+            current_mtime = None
+        if (
+            self._demo_entries_cache is not None
+            and current_mtime == self._demo_entries_mtime
+        ):
+            return list(self._demo_entries_cache)
+
         entries: list[PhotoManifestEntry] = []
         for path in sorted(self.demo_dir.iterdir()):
             if path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp", ".svg"}:
@@ -173,6 +192,8 @@ class ImageCache:
                     content_hash=path.stem,
                 )
             )
+        self._demo_entries_cache = list(entries)
+        self._demo_entries_mtime = current_mtime
         return entries
 
     def entry_for_filename(self, filename: str) -> PhotoManifestEntry | None:

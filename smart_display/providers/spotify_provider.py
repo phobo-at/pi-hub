@@ -45,6 +45,28 @@ def build_spotify_state_from_payload(
     )
 
 
+# Plan C3: Spotify API failures get a short German message so the frontend
+# toast surface (Plan A4) can show something honest instead of "Spotify
+# antwortete mit 429". Anything we don't recognise falls back to a generic
+# "not reachable" string.
+_SPOTIFY_STATUS_MESSAGES: dict[int, str] = {
+    401: "Spotify-Anmeldung abgelaufen.",
+    403: "Spotify-Aktion nicht erlaubt.",
+    404: "Kein aktives Spotify-Gerät.",
+    429: "Spotify-Limit erreicht. Kurz warten.",
+    500: "Spotify nicht erreichbar.",
+    502: "Spotify nicht erreichbar.",
+    503: "Spotify nicht erreichbar.",
+    504: "Spotify nicht erreichbar.",
+}
+_SPOTIFY_DEFAULT_ERROR = "Spotify nicht erreichbar."
+
+
+def spotify_status_message(status: int) -> str:
+    """Return the German-localised error message for a Spotify HTTP status."""
+    return _SPOTIFY_STATUS_MESSAGES.get(status, _SPOTIFY_DEFAULT_ERROR)
+
+
 class SpotifyProvider(BaseProvider):
     section_name = "spotify"
     source_name = "spotify"
@@ -169,24 +191,24 @@ class SpotifyProvider(BaseProvider):
 
         try:
             response = self._api_request(method, path)
-        except HttpError as exc:
-            return {"ok": False, "message": str(exc), "state": None}
-        except Exception as exc:  # noqa: BLE001 — token refresh errors bubble here
-            return {"ok": False, "message": str(exc), "state": None}
+        except HttpError:
+            return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
+        except Exception:  # noqa: BLE001 — token refresh errors bubble here
+            return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
 
         if response.status == 401:
             with self._token_lock:
                 self._access_token = None
             return {
                 "ok": False,
-                "message": "Spotify-Anmeldung abgelaufen.",
+                "message": spotify_status_message(401),
                 "state": None,
             }
 
         if response.status not in {200, 202, 204}:
             return {
                 "ok": False,
-                "message": f"Spotify antwortete mit {response.status}.",
+                "message": spotify_status_message(response.status),
                 "state": None,
             }
 

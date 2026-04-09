@@ -10,6 +10,7 @@ from smart_display.models import ProviderSnapshot
 from smart_display.providers.spotify_provider import (
     SpotifyProvider,
     build_spotify_state_from_payload,
+    spotify_status_message,
 )
 from tests._support import FakeHttpClient, make_app_config, make_state_store
 
@@ -157,7 +158,8 @@ class SpotifyControlFlowTest(unittest.TestCase):
         result = self.provider.toggle_playback()
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["message"], "connection reset")
+        # Plan C3: user-facing messages are localised, not raw exception text.
+        self.assertEqual(result["message"], "Spotify nicht erreichbar.")
         self.assertIsNone(result["state"])
 
     def test_toggle_propagates_error_message_on_generic_5xx(self) -> None:
@@ -171,7 +173,7 @@ class SpotifyControlFlowTest(unittest.TestCase):
         result = self.provider.toggle_playback()
 
         self.assertFalse(result["ok"])
-        self.assertIn("502", result["message"])
+        self.assertEqual(result["message"], "Spotify nicht erreichbar.")
         self.assertIsNone(result["state"])
 
     def test_volume_command_refreshes_inline(self) -> None:
@@ -228,6 +230,51 @@ class SpotifyControlFlowTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertEqual(result["message"], "Spotify ist nicht konfiguriert.")
             self.assertEqual(fake.calls, [])
+
+
+class SpotifyStatusMessageTest(unittest.TestCase):
+    """Plan C3: raw Spotify HTTP status codes get mapped to short German
+    toast messages so the user sees actionable German UI copy instead of
+    ``Spotify antwortete mit 429``."""
+
+    def test_401_maps_to_login_expired(self) -> None:
+        self.assertEqual(
+            spotify_status_message(401), "Spotify-Anmeldung abgelaufen."
+        )
+
+    def test_403_maps_to_action_not_allowed(self) -> None:
+        self.assertEqual(
+            spotify_status_message(403), "Spotify-Aktion nicht erlaubt."
+        )
+
+    def test_404_maps_to_no_device(self) -> None:
+        self.assertEqual(
+            spotify_status_message(404), "Kein aktives Spotify-Gerät."
+        )
+
+    def test_429_maps_to_rate_limit(self) -> None:
+        self.assertEqual(
+            spotify_status_message(429), "Spotify-Limit erreicht. Kurz warten."
+        )
+
+    def test_generic_5xx_maps_to_not_reachable(self) -> None:
+        for status in (500, 502, 503, 504):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    spotify_status_message(status), "Spotify nicht erreichbar."
+                )
+
+    def test_unknown_status_falls_back_to_generic(self) -> None:
+        self.assertEqual(
+            spotify_status_message(418), "Spotify nicht erreichbar."
+        )
+
+    def test_messages_contain_real_umlauts(self) -> None:
+        # AGENTS.md rule: echte Umlaute, kein Mojibake.
+        for status in (401, 403, 404, 429, 500):
+            message = spotify_status_message(status)
+            self.assertNotIn("ae", message.lower().replace("warten", ""))
+            self.assertNotIn("?", message)
 
 
 if __name__ == "__main__":

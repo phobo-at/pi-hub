@@ -217,5 +217,77 @@ class RetryBackoffMathTest(unittest.TestCase):
         self.assertEqual(_compute_next_retry(20), _MAX_BACKOFF_SECONDS)
 
 
+class DemoEntriesCacheTest(unittest.TestCase):
+    """Plan C2: ``demo_entries`` used to re-walk the demo dir on every
+    ``next_entry`` tick. Cache it, but invalidate when the directory mtime
+    changes so adding/removing demo files still takes effect."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.demo_dir = self.tmp / "demo"
+        self.demo_dir.mkdir()
+        (self.demo_dir / "first.jpg").write_bytes(SAMPLE_PNG)
+
+    def _make_cache(self) -> ImageCache:
+        return ImageCache(
+            cache_dir=self.tmp / "screensaver",
+            manifest_path=self.tmp / "screensaver" / "manifest.json",
+            demo_dir=self.demo_dir,
+            downloader=lambda url, timeout: (SAMPLE_PNG, {}),
+        )
+
+    def test_demo_entries_cached_between_calls(self) -> None:
+        cache = self._make_cache()
+        first = cache.demo_entries()
+        self.assertEqual(len(first), 1)
+
+        # Monkey-patch iterdir to detect any re-scan attempts.
+        calls = {"count": 0}
+        original_iterdir = Path.iterdir
+
+        def counting_iterdir(self_path):
+            if self_path == self.demo_dir:
+                calls["count"] += 1
+            return original_iterdir(self_path)
+
+        Path.iterdir = counting_iterdir  # type: ignore[assignment]
+        try:
+            second = cache.demo_entries()
+            third = cache.demo_entries()
+        finally:
+            Path.iterdir = original_iterdir  # type: ignore[assignment]
+
+        self.assertEqual(len(second), 1)
+        self.assertEqual(len(third), 1)
+        self.assertEqual(calls["count"], 0, "cache must not re-walk demo dir")
+
+    def test_demo_cache_invalidates_on_mtime_change(self) -> None:
+        cache = self._make_cache()
+        self.assertEqual(len(cache.demo_entries()), 1)
+
+        # Add a second file and bump the directory mtime.
+        (self.demo_dir / "second.jpg").write_bytes(SAMPLE_PNG)
+        import os as _os
+
+        st = self.demo_dir.stat()
+        _os.utime(self.demo_dir, (st.st_atime, st.st_mtime + 10))
+
+        refreshed = cache.demo_entries()
+        self.assertEqual(len(refreshed), 2)
+
+    def test_demo_cache_returns_empty_if_dir_vanishes(self) -> None:
+        cache = self._make_cache()
+        self.assertEqual(len(cache.demo_entries()), 1)
+
+        # Delete the demo directory entirely.
+        for child in self.demo_dir.iterdir():
+            child.unlink()
+        self.demo_dir.rmdir()
+
+        self.assertEqual(cache.demo_entries(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
