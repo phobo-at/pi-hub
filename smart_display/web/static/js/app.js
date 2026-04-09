@@ -44,16 +44,11 @@
     month: "long",
     timeZone: TIMEZONE,
   });
-  const CLOCK_TZ_FMT = new Intl.DateTimeFormat(LOCALE, {
-    timeZone: TIMEZONE,
-    timeZoneName: "longGeneric",
-  });
   let clockTimer = null;
 
   const nodes = {
     time: document.getElementById("clock-time"),
     date: document.getElementById("clock-date"),
-    heroLocale: document.getElementById("hero-locale"),
     weatherLocation: document.getElementById("weather-location"),
     weatherStatus: document.getElementById("weather-status"),
     weatherTemperature: document.getElementById("weather-temperature"),
@@ -199,10 +194,6 @@
     nodes.time.textContent = timeValue;
     nodes.date.textContent = CLOCK_DATE_FMT.format(now);
     nodes.screensaverClock.textContent = timeValue;
-    const timezoneName =
-      CLOCK_TZ_FMT.formatToParts(now).find((part) => part.type === "timeZoneName")
-        ?.value || TIMEZONE;
-    nodes.heroLocale.textContent = timezoneName;
   }
 
   function scheduleClockTick() {

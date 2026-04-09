@@ -4,33 +4,17 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from smart_display.i18n import (
-    GERMAN_MONTHS_LONG,
-    format_initial_clock,
-    german_timezone_label,
-)
+from smart_display.i18n import GERMAN_MONTHS_LONG, format_initial_clock
 
 
 class FormatInitialClockTest(unittest.TestCase):
     """Plan B14: the hero clock must render useful German labels on the
-    server so a cold reload never shows ``--:--`` or a raw IANA id."""
+    server so a cold reload never shows a ``--:--`` placeholder."""
 
     def test_month_list_is_complete(self) -> None:
         self.assertEqual(len(GERMAN_MONTHS_LONG), 12)
         self.assertEqual(GERMAN_MONTHS_LONG[0], "Januar")
         self.assertEqual(GERMAN_MONTHS_LONG[2], "März")
-
-    def test_timezone_label_known_zone(self) -> None:
-        self.assertEqual(
-            german_timezone_label("Europe/Vienna"),
-            "Mitteleuropäische Zeit",
-        )
-
-    def test_timezone_label_unknown_zone_falls_back_to_id(self) -> None:
-        self.assertEqual(
-            german_timezone_label("Antarctica/Troll"),
-            "Antarctica/Troll",
-        )
 
     def test_formats_initial_clock_with_german_weekday(self) -> None:
         # 2026-04-08 09:42 UTC → 11:42 in Vienna (summer DST).
@@ -38,7 +22,7 @@ class FormatInitialClockTest(unittest.TestCase):
         result = format_initial_clock("Europe/Vienna", now=frozen)
         self.assertEqual(result["time"], "11:42")
         self.assertEqual(result["date"], "Mittwoch, 8. April")
-        self.assertEqual(result["timezone_label"], "Mitteleuropäische Zeit")
+        self.assertNotIn("timezone_label", result)
 
     def test_formats_initial_clock_respects_zone_difference(self) -> None:
         # Same UTC instant, different zone → different HH:MM.

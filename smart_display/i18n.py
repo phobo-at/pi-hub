@@ -28,29 +28,13 @@ GERMAN_MONTHS_LONG = [
 ]
 
 
-# IANA zone → human German display name. Only populated for zones we care
-# about so far; unknown zones fall back to the raw IANA id.
-IANA_LABELS: dict[str, str] = {
-    "Europe/Vienna": "Mitteleuropäische Zeit",
-    "Europe/Berlin": "Mitteleuropäische Zeit",
-    "Europe/Zurich": "Mitteleuropäische Zeit",
-    "Europe/London": "Britische Zeit",
-    "UTC": "Weltzeit (UTC)",
-}
-
-
-def german_timezone_label(iana_name: str) -> str:
-    """Return the long German display name for a zone, falling back to the id."""
-    return IANA_LABELS.get(iana_name, iana_name)
-
-
 def format_initial_clock(
     iana_name: str, *, now: datetime | None = None
 ) -> dict[str, str]:
     """Return the values needed to server-render the hero clock.
 
     ``now`` is injectable so tests can freeze time. All strings are German
-    with real umlauts — no ``--:--`` placeholder, no raw ``Europe/Vienna``.
+    with real umlauts — no ``--:--`` placeholder on cold reload.
     """
     zone = ZoneInfo(iana_name)
     current = (now or datetime.now()).astimezone(zone)
@@ -59,5 +43,4 @@ def format_initial_clock(
     return {
         "time": current.strftime("%H:%M"),
         "date": f"{weekday}, {current.day}. {month}",
-        "timezone_label": german_timezone_label(iana_name),
     }
