@@ -327,6 +327,23 @@ class PhotoManifestEntry:
         )
 
 
+# Bump on any breaking change to the DashboardState shape (field renamed,
+# nested dataclass removed, semantics changed). On load, a mismatch is
+# surfaced via IncompatibleSchemaError so StateStore can quarantine the
+# stale cache file and boot from a fresh empty state instead of limping
+# along with a half-populated dashboard. Additive changes (new optional
+# field with a default) do NOT need a bump.
+DASHBOARD_SCHEMA_VERSION = 1
+
+
+class IncompatibleSchemaError(ValueError):
+    """Raised when ``last_good.json`` was written by a different schema.
+
+    The caller — ``StateStore._load_initial_state`` — quarantines the file
+    and boots from empty so the UI still comes up.
+    """
+
+
 @dataclass(slots=True)
 class DashboardState:
     weather: WeatherState
@@ -336,6 +353,7 @@ class DashboardState:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": DASHBOARD_SCHEMA_VERSION,
             "weather": self.weather.to_dict(),
             "calendar": self.calendar.to_dict(),
             "spotify": self.spotify.to_dict(),
@@ -345,6 +363,18 @@ class DashboardState:
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "DashboardState":
         data = data or {}
+        # Absence of ``schema_version`` is treated as "pre-versioning" — i.e.
+        # caches written by the V1-release code are ALWAYS tagged, anything
+        # without a tag is a payload from before this field existed. Since
+        # V1 is our first shipping version we treat untagged == compatible
+        # (the fields are the same). Once we ship V1, bumping the constant
+        # will start rejecting untagged caches on upgrade.
+        version = data.get("schema_version")
+        if version is not None and version != DASHBOARD_SCHEMA_VERSION:
+            raise IncompatibleSchemaError(
+                f"dashboard schema_version {version!r} does not match "
+                f"runtime {DASHBOARD_SCHEMA_VERSION}"
+            )
         return cls(
             weather=WeatherState.from_dict(data.get("weather")),
             calendar=CalendarState.from_dict(data.get("calendar")),

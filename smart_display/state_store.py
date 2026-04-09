@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+import os
 import threading
+import time
 from dataclasses import replace
 from typing import Any
 
@@ -9,12 +12,16 @@ from smart_display.config import AppConfig
 from smart_display.models import (
     CalendarState,
     DashboardState,
+    IncompatibleSchemaError,
     ProviderSnapshot,
     SpotifyState,
     SystemState,
     WeatherState,
     utcnow_iso,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class StateStore:
@@ -110,19 +117,53 @@ class StateStore:
     def _persist_locked(self) -> None:
         self._cache.save(self._state.to_dict())
 
+    def _quarantine_cache(self) -> None:
+        """Rename the on-disk cache aside so a bad payload can't poison
+        the next boot. Mirrors ``DiskCache`` corruption handling so ops can
+        always find the old file with a ``*.corrupt-*`` suffix."""
+        path = self._cache.path
+        try:
+            if path.exists():
+                target = path.with_name(
+                    f"{path.name}.corrupt-{int(time.time())}"
+                )
+                os.replace(path, target)
+                logger.warning("moved stale cache to %s", target)
+        except OSError as exc:  # pragma: no cover — best effort
+            logger.warning("could not quarantine %s: %s", path, exc)
+
     def _load_initial_state(self) -> DashboardState:
         payload = self._cache.load()
         if payload:
-            state = DashboardState.from_dict(payload)
-            state.system.locale = self.config.app.locale
-            state.system.timezone = self.config.app.timezone
-            state.system.idle_timeout_seconds = (
-                self.config.screensaver.idle_timeout_seconds
-            )
-            state.system.screensaver_interval_seconds = (
-                self.config.screensaver.image_duration_seconds
-            )
-            return state
+            try:
+                state = DashboardState.from_dict(payload)
+            except IncompatibleSchemaError as exc:
+                # Same quarantine pattern as DiskCache (Plan S2): log once,
+                # rename the file aside, fall through to an empty boot.
+                logger.warning(
+                    "quarantining last_good.json due to schema mismatch: %s", exc
+                )
+                self._quarantine_cache()
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                # ``from_dict`` duck-types its input — if the payload is a
+                # list or a dict-of-string-at-expected-nested-dict, the
+                # deserialiser raises AttributeError. Widen the catch so
+                # any malformed cache lands in quarantine instead of
+                # crashing the app at boot.
+                logger.warning(
+                    "quarantining last_good.json due to malformed payload: %s", exc
+                )
+                self._quarantine_cache()
+            else:
+                state.system.locale = self.config.app.locale
+                state.system.timezone = self.config.app.timezone
+                state.system.idle_timeout_seconds = (
+                    self.config.screensaver.idle_timeout_seconds
+                )
+                state.system.screensaver_interval_seconds = (
+                    self.config.screensaver.image_duration_seconds
+                )
+                return state
 
         system = SystemState(
             locale=self.config.app.locale,
