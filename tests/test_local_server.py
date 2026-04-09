@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tempfile
+import types
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from flask import Flask
 
+from smart_display.app import serve_app
 from smart_display.config import load_config
 from smart_display.local_server import _load_local_env
 from smart_display.web.routes import create_blueprint
@@ -208,6 +212,74 @@ class LoopbackOnlyPostsTest(unittest.TestCase):
             environ_overrides={"REMOTE_ADDR": "192.168.1.5"},
         )
         self.assertEqual(response.status_code, 200)
+
+
+class _FakeWaitressModule(types.ModuleType):
+    """Tiny stand-in so ``serve_app`` can import ``waitress.serve`` during
+    tests without actually starting a server. Records the call args so the
+    test can assert Waitress was bound to loopback."""
+
+    def __init__(self) -> None:
+        super().__init__("waitress")
+        self.calls: list[dict] = []
+
+        def _serve(app, *, host, port):  # noqa: ANN001 - test stub
+            self.calls.append({"app": app, "host": host, "port": port})
+
+        self.serve = _serve
+
+
+class ServeAppLoopbackEnforcementTest(unittest.TestCase):
+    """Plan B10 (hard fail): ``serve_app`` must refuse a non-loopback host
+    at start-up instead of silently coercing it. A silent coercion hides
+    the mistake in log noise — a raise forces ops to notice."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._fake = _FakeWaitressModule()
+        sys.modules["waitress"] = self._fake
+        self.addCleanup(lambda: sys.modules.pop("waitress", None))
+
+    def _make_app(self, host: str) -> Flask:
+        tmp = Path(self._tmp.name)
+        base = make_app_config(tmp)
+        # ``AppConfig``/``AppSection`` are frozen dataclasses in places —
+        # ``replace`` is the safe way to swap the host field without
+        # depending on mutability.
+        config = replace(base, app=replace(base.app, host=host))
+        app = Flask(__name__)
+        app.extensions["smart_display"] = {"config": config}
+        return app
+
+    def test_serve_app_accepts_loopback_host(self) -> None:
+        app = self._make_app("127.0.0.1")
+        serve_app(app)
+        self.assertEqual(len(self._fake.calls), 1)
+        self.assertEqual(self._fake.calls[0]["host"], "127.0.0.1")
+
+    def test_serve_app_accepts_ipv6_loopback(self) -> None:
+        app = self._make_app("::1")
+        serve_app(app)
+        self.assertEqual(self._fake.calls[0]["host"], "::1")
+
+    def test_serve_app_accepts_localhost(self) -> None:
+        app = self._make_app("localhost")
+        serve_app(app)
+        self.assertEqual(self._fake.calls[0]["host"], "localhost")
+
+    def test_serve_app_rejects_wildcard_bind(self) -> None:
+        app = self._make_app("0.0.0.0")
+        with self.assertRaises(RuntimeError) as ctx:
+            serve_app(app)
+        self.assertIn("0.0.0.0", str(ctx.exception))
+        self.assertEqual(self._fake.calls, [])
+
+    def test_serve_app_rejects_lan_address(self) -> None:
+        app = self._make_app("192.168.1.5")
+        with self.assertRaises(RuntimeError):
+            serve_app(app)
+        self.assertEqual(self._fake.calls, [])
 
 
 if __name__ == "__main__":

@@ -108,6 +108,9 @@ def main() -> None:
     serve_app(app)
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
 def serve_app(app: Flask) -> None:
     config: AppConfig = app.extensions["smart_display"]["config"]
     try:
@@ -115,18 +118,19 @@ def serve_app(app: Flask) -> None:
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("waitress is required to run the production server.") from exc
 
-    # Plan B10: force the bind to loopback no matter what the config file
-    # says. The POST endpoints are already guarded by ``local_only``, but
-    # keeping Waitress off ``0.0.0.0`` prevents the device from becoming a
-    # LAN-reachable controller even in the face of a mistake in
-    # ``config/default.yaml`` or an env override.
+    # Plan B10: refuse to serve on anything other than loopback. Previously
+    # a misconfigured ``APP_HOST=0.0.0.0`` was silently coerced back to
+    # ``127.0.0.1`` with a WARNING log line — which is exactly the kind of
+    # footgun that makes ops think the setting is respected when it isn't.
+    # Failing loudly at start-up surfaces the mistake before the kiosk ever
+    # comes up. The POST endpoints remain guarded by ``local_only`` as a
+    # second line of defence.
     host = config.app.host or "127.0.0.1"
-    if host not in {"127.0.0.1", "::1", "localhost"}:
-        logging.getLogger(__name__).warning(
-            "forcing Waitress bind to 127.0.0.1 (configured host %r is not loopback)",
-            host,
+    if host not in _LOOPBACK_HOSTS:
+        raise RuntimeError(
+            f"refusing to serve Smart Display on non-loopback host {host!r}; "
+            "set app.host to 127.0.0.1, ::1 or localhost"
         )
-        host = "127.0.0.1"
     serve(app, host=host, port=config.app.port)
 
 
