@@ -18,8 +18,21 @@ from __future__ import annotations
 from typing import Iterable
 
 
-VALID_WATCH_FACES: frozenset[str] = frozenset({"classic", "qlocktwo"})
+VALID_WATCH_FACES: frozenset[str] = frozenset({"classic", "qlocktwo", "analog"})
 DEFAULT_WATCH_FACE = "classic"
+
+
+def analog_hand_angles(hour: int, minute: int) -> dict[str, float]:
+    """Return the hour/minute hand rotations in degrees for the analog face.
+
+    The hour hand advances continuously with the minute (``hour * 30`` plus
+    ``minute * 0.5``) so that e.g. 7:30 sits exactly between 7 and 8. The
+    minute hand is a simple ``minute * 6``. Degrees are modulo-360 floats so
+    the frontend can ``setAttribute('transform', ...)`` without extra math.
+    """
+    hour_deg = ((hour % 12) * 30 + minute * 0.5) % 360
+    minute_deg = (minute * 6) % 360
+    return {"hour": hour_deg, "minute": minute_deg}
 
 
 # 11 columns × 10 rows. Real umlauts, as required by the project conventions.

@@ -8,6 +8,7 @@ from smart_display.watch_faces import (
     QLOCKTWO_GRID,
     QLOCKTWO_ROWS,
     VALID_WATCH_FACES,
+    analog_hand_angles,
     normalize_watch_face,
     qlocktwo_active_cells,
     qlocktwo_phrase,
@@ -18,6 +19,7 @@ class NormalizeWatchFaceTest(unittest.TestCase):
     def test_accepts_known_values(self) -> None:
         self.assertEqual(normalize_watch_face("classic"), "classic")
         self.assertEqual(normalize_watch_face("qlocktwo"), "qlocktwo")
+        self.assertEqual(normalize_watch_face("analog"), "analog")
 
     def test_falls_back_for_unknown_or_missing(self) -> None:
         self.assertEqual(normalize_watch_face(None), DEFAULT_WATCH_FACE)
@@ -97,6 +99,43 @@ class QlocktwoActiveCellsTest(unittest.TestCase):
             self.assertEqual(len(entry), 2)
             self.assertIsInstance(entry[0], int)
             self.assertIsInstance(entry[1], int)
+
+
+class AnalogHandAnglesTest(unittest.TestCase):
+    def test_twelve_oclock_points_up(self) -> None:
+        angles = analog_hand_angles(12, 0)
+        self.assertAlmostEqual(angles["hour"], 0.0)
+        self.assertAlmostEqual(angles["minute"], 0.0)
+        # Midnight (24h hour = 0) must also fold to the top.
+        angles = analog_hand_angles(0, 0)
+        self.assertAlmostEqual(angles["hour"], 0.0)
+
+    def test_three_oclock_points_right(self) -> None:
+        angles = analog_hand_angles(3, 0)
+        self.assertAlmostEqual(angles["hour"], 90.0)
+        self.assertAlmostEqual(angles["minute"], 0.0)
+
+    def test_six_thirty_hour_hand_between_six_and_seven(self) -> None:
+        # 6:30 → hour hand at 6*30 + 30*0.5 = 195°. Minute hand at 180°.
+        angles = analog_hand_angles(6, 30)
+        self.assertAlmostEqual(angles["hour"], 195.0)
+        self.assertAlmostEqual(angles["minute"], 180.0)
+
+    def test_afternoon_folds_to_12h(self) -> None:
+        # 15:00 should behave like 3:00 on the dial.
+        afternoon = analog_hand_angles(15, 0)
+        morning = analog_hand_angles(3, 0)
+        self.assertAlmostEqual(afternoon["hour"], morning["hour"])
+        self.assertAlmostEqual(afternoon["minute"], morning["minute"])
+
+    def test_angles_are_bounded(self) -> None:
+        for hour in range(24):
+            for minute in range(60):
+                angles = analog_hand_angles(hour, minute)
+                self.assertGreaterEqual(angles["hour"], 0.0)
+                self.assertLess(angles["hour"], 360.0)
+                self.assertGreaterEqual(angles["minute"], 0.0)
+                self.assertLess(angles["minute"], 360.0)
 
 
 if __name__ == "__main__":

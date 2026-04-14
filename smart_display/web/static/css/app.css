@@ -117,7 +117,8 @@ body {
 }
 
 .watch-face__classic,
-.watch-face__qlocktwo {
+.watch-face__qlocktwo,
+.watch-face__analog {
   display: none;
 }
 
@@ -127,6 +128,10 @@ body[data-watch-face="classic"] .watch-face__classic {
 
 body[data-watch-face="qlocktwo"] .watch-face__qlocktwo {
   display: grid;
+}
+
+body[data-watch-face="analog"] .watch-face__analog {
+  display: flex;
 }
 
 .hero-time {
@@ -171,6 +176,67 @@ body[data-watch-face="qlocktwo"] .watch-face__qlocktwo {
 
 @media (prefers-reduced-motion: reduce) {
   .qlocktwo-letter {
+    transition: none;
+  }
+}
+
+.watch-face__analog {
+  align-items: flex-start;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.analog-clock {
+  width: clamp(200px, 26vw, 280px);
+  height: clamp(200px, 26vw, 280px);
+  display: block;
+}
+
+.analog-clock__face {
+  fill: rgba(255, 255, 255, 0.03);
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 1.2;
+}
+
+.analog-clock__tick {
+  stroke: rgba(216, 231, 255, 0.55);
+  stroke-linecap: round;
+}
+
+.analog-clock__tick--hour {
+  stroke-width: 3.2;
+}
+
+.analog-clock__tick--minute {
+  stroke: rgba(216, 231, 255, 0.22);
+  stroke-width: 1.2;
+}
+
+.analog-clock__hand {
+  stroke: var(--accent-strong);
+  stroke-linecap: round;
+  transform-origin: 100px 100px;
+  transition: transform 420ms cubic-bezier(0.3, 0.7, 0.25, 1);
+  will-change: transform;
+}
+
+.analog-clock__hand--hour {
+  stroke-width: 6;
+}
+
+.analog-clock__hand--minute {
+  stroke-width: 4;
+  stroke-opacity: 0.92;
+}
+
+.analog-clock__pivot {
+  fill: var(--accent-strong);
+  stroke: rgba(15, 18, 22, 0.95);
+  stroke-width: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analog-clock__hand {
     transition: none;
   }
 }
@@ -693,6 +759,11 @@ body[data-watch-face="qlocktwo"] .watch-face__qlocktwo {
 
   .qlocktwo-row {
     gap: 1px;
+  }
+
+  .analog-clock {
+    width: clamp(150px, 19vw, 200px);
+    height: clamp(150px, 19vw, 200px);
   }
 
   .hero-date {

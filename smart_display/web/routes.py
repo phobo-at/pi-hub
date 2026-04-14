@@ -10,7 +10,11 @@ from zoneinfo import ZoneInfo
 from smart_display.i18n import format_initial_clock
 from smart_display.models import PhotoManifestEntry
 from smart_display.scheduler import DEFAULT_PAUSE_TTL_SECONDS
-from smart_display.watch_faces import QLOCKTWO_GRID, qlocktwo_active_cells
+from smart_display.watch_faces import (
+    QLOCKTWO_GRID,
+    analog_hand_angles,
+    qlocktwo_active_cells,
+)
 from smart_display.web.origin_guard import local_only
 
 
@@ -28,6 +32,7 @@ def create_blueprint() -> Blueprint:
         initial_clock = clock_factory(config.app.timezone)
         now_local = datetime.now(ZoneInfo(config.app.timezone))
         initial_qlocktwo = qlocktwo_active_cells(now_local.hour, now_local.minute)
+        initial_analog = analog_hand_angles(now_local.hour, now_local.minute)
         return render_template(
             "index.html",
             app_title="Smart Display",
@@ -45,6 +50,7 @@ def create_blueprint() -> Blueprint:
             initial_clock=initial_clock,
             qlocktwo_grid=QLOCKTWO_GRID,
             qlocktwo_active=initial_qlocktwo,
+            initial_analog=initial_analog,
             initial_watch_face=config.app.watch_face,
         )
 

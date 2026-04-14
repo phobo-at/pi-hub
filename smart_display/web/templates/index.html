@@ -18,6 +18,24 @@
             <div class="watch-face__classic" id="watch-face-classic">
               <div class="hero-time" id="clock-time">{{ initial_clock.time }}</div>
             </div>
+            <div class="watch-face__analog" id="watch-face-analog" aria-hidden="true">
+              <svg class="analog-clock" viewBox="0 0 200 200" role="img" aria-label="Analoge Uhr" focusable="false">
+                <circle class="analog-clock__face" cx="100" cy="100" r="92"></circle>
+                <g class="analog-clock__ticks">
+                  {%- for tick in range(12) -%}
+                    <line class="analog-clock__tick analog-clock__tick--hour" x1="100" y1="14" x2="100" y2="26" transform="rotate({{ tick * 30 }} 100 100)"></line>
+                  {%- endfor -%}
+                  {%- for tick in range(60) -%}
+                    {%- if tick % 5 != 0 -%}
+                      <line class="analog-clock__tick analog-clock__tick--minute" x1="100" y1="14" x2="100" y2="20" transform="rotate({{ tick * 6 }} 100 100)"></line>
+                    {%- endif -%}
+                  {%- endfor -%}
+                </g>
+                <line class="analog-clock__hand analog-clock__hand--hour" id="analog-hand-hour" x1="100" y1="112" x2="100" y2="54" transform="rotate({{ initial_analog.hour }} 100 100)"></line>
+                <line class="analog-clock__hand analog-clock__hand--minute" id="analog-hand-minute" x1="100" y1="116" x2="100" y2="30" transform="rotate({{ initial_analog.minute }} 100 100)"></line>
+                <circle class="analog-clock__pivot" cx="100" cy="100" r="5"></circle>
+              </svg>
+            </div>
             <div class="watch-face__qlocktwo" id="watch-face-qlocktwo" aria-hidden="true">
               {%- set active_keys = qlocktwo_active|map("join", ",")|list -%}
               {%- for row in qlocktwo_grid -%}

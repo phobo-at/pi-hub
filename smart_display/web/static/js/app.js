@@ -75,10 +75,11 @@
     11: [7, 0, 3],
     12: [4, 5, 5],
   };
-  const VALID_WATCH_FACES = ["classic", "qlocktwo"];
+  const VALID_WATCH_FACES = ["classic", "qlocktwo", "analog"];
   const WATCH_FACE_LABELS = {
     classic: "Klassisch",
     qlocktwo: "Wortuhr",
+    analog: "Analog",
   };
   const WATCH_FACE_STORAGE_KEY = "sd.watch_face";
   let qlocktwoLetterIndex = null;
@@ -208,6 +209,34 @@
     });
   }
 
+  let lastAnalogKey = "";
+
+  function updateAnalog(force) {
+    if (!nodes.analogHour || !nodes.analogMinute) {
+      return;
+    }
+    const now = new Date();
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = now.getHours();
+    let minute = now.getMinutes();
+    for (const part of parts) {
+      if (part.type === "hour") {
+        hour = Number(part.value);
+      } else if (part.type === "minute") {
+        minute = Number(part.value);
+      }
+    }
+    const key = `${hour}:${minute}`;
+    if (!force && key === lastAnalogKey) {
+      return;
+    }
+    lastAnalogKey = key;
+    const hourDeg = (((hour % 12) * 30 + minute * 0.5) % 360).toFixed(2);
+    const minuteDeg = ((minute * 6) % 360).toFixed(2);
+    nodes.analogHour.setAttribute("transform", `rotate(${hourDeg} 100 100)`);
+    nodes.analogMinute.setAttribute("transform", `rotate(${minuteDeg} 100 100)`);
+  }
+
   function currentWatchFace() {
     const stored = (() => {
       try {
@@ -235,8 +264,14 @@
     if (nodes.qlocktwo) {
       nodes.qlocktwo.setAttribute("aria-hidden", next === "qlocktwo" ? "false" : "true");
     }
+    const analogWrap = document.getElementById("watch-face-analog");
+    if (analogWrap) {
+      analogWrap.setAttribute("aria-hidden", next === "analog" ? "false" : "true");
+    }
     if (next === "qlocktwo") {
       updateQlocktwo(true);
+    } else if (next === "analog") {
+      updateAnalog(true);
     }
     return next;
   }
@@ -261,6 +296,8 @@
     date: document.getElementById("clock-date"),
     watchFace: document.getElementById("watch-face"),
     qlocktwo: document.getElementById("watch-face-qlocktwo"),
+    analogHour: document.getElementById("analog-hand-hour"),
+    analogMinute: document.getElementById("analog-hand-minute"),
     weatherLocation: document.getElementById("weather-location"),
     weatherStatus: document.getElementById("weather-status"),
     weatherTemperature: document.getElementById("weather-temperature"),
@@ -407,6 +444,7 @@
     nodes.date.textContent = CLOCK_DATE_FMT.format(now);
     nodes.screensaverClock.textContent = timeValue;
     updateQlocktwo(false);
+    updateAnalog(false);
   }
 
   function scheduleClockTick() {
