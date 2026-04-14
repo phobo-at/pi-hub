@@ -61,8 +61,10 @@
     HALB: [4, 0, 4],
     UHR: [9, 8, 3],
   };
+  // Hour 1 has two forms — see smart_display/watch_faces.py for the rule.
+  const QLOCKTWO_HOUR_EIN = [5, 2, 3];   // "EIN" — only paired with UHR at the full hour.
   const QLOCKTWO_HOUR_WORDS = {
-    1: [5, 2, 3],
+    1: [5, 2, 4],  // EINS — default for every non-"ein Uhr" context.
     2: [5, 0, 4],
     3: [6, 1, 4],
     4: [7, 7, 4],
@@ -97,7 +99,7 @@
     const words = [QLOCKTWO_WORDS.ES, QLOCKTWO_WORDS.IST];
     switch (block) {
       case 0:
-        words.push(QLOCKTWO_HOUR_WORDS[thisHour], QLOCKTWO_WORDS.UHR);
+        words.push(thisHour === 1 ? QLOCKTWO_HOUR_EIN : QLOCKTWO_HOUR_WORDS[thisHour], QLOCKTWO_WORDS.UHR);
         break;
       case 5:
         words.push(QLOCKTWO_WORDS.FUENF_MIN, QLOCKTWO_WORDS.NACH, QLOCKTWO_HOUR_WORDS[thisHour]);
@@ -210,9 +212,10 @@
   }
 
   let lastAnalogKey = "";
+  let analogSecondTimer = null;
 
   function updateAnalog(force) {
-    if (!nodes.analogHour || !nodes.analogMinute) {
+    if (!nodes.analogHour || !nodes.analogMinute || !nodes.analogSecond) {
       return;
     }
     const now = new Date();
@@ -226,6 +229,13 @@
         minute = Number(part.value);
       }
     }
+    // Seconds are the same across all timezones, so the native getter is
+    // safe here (unlike hour/minute which must follow config.timezone).
+    const secondDeg = ((now.getSeconds() * 6) % 360).toFixed(2);
+    nodes.analogSecond.setAttribute("transform", `rotate(${secondDeg} 100 100)`);
+
+    // Hour + minute only change on minute boundaries — cache to skip the
+    // two setAttribute calls on the 1 Hz seconds tick.
     const key = `${hour}:${minute}`;
     if (!force && key === lastAnalogKey) {
       return;
@@ -235,6 +245,26 @@
     const minuteDeg = ((minute * 6) % 360).toFixed(2);
     nodes.analogHour.setAttribute("transform", `rotate(${hourDeg} 100 100)`);
     nodes.analogMinute.setAttribute("transform", `rotate(${minuteDeg} 100 100)`);
+  }
+
+  function startAnalogSecondTick() {
+    if (analogSecondTimer !== null) {
+      return;
+    }
+    // Align the first tick to the next second boundary so the hand steps
+    // in sync with real-world seconds rather than drifting off by up to 1 s.
+    const msUntilNextSecond = 1000 - (Date.now() % 1000);
+    analogSecondTimer = window.setTimeout(function tick() {
+      updateAnalog(false);
+      analogSecondTimer = window.setTimeout(tick, 1000);
+    }, msUntilNextSecond + 10);
+  }
+
+  function stopAnalogSecondTick() {
+    if (analogSecondTimer !== null) {
+      window.clearTimeout(analogSecondTimer);
+      analogSecondTimer = null;
+    }
   }
 
   function currentWatchFace() {
@@ -270,8 +300,12 @@
     }
     if (next === "qlocktwo") {
       updateQlocktwo(true);
+      stopAnalogSecondTick();
     } else if (next === "analog") {
       updateAnalog(true);
+      startAnalogSecondTick();
+    } else {
+      stopAnalogSecondTick();
     }
     return next;
   }
@@ -298,6 +332,7 @@
     qlocktwo: document.getElementById("watch-face-qlocktwo"),
     analogHour: document.getElementById("analog-hand-hour"),
     analogMinute: document.getElementById("analog-hand-minute"),
+    analogSecond: document.getElementById("analog-hand-second"),
     weatherLocation: document.getElementById("weather-location"),
     weatherStatus: document.getElementById("weather-status"),
     weatherTemperature: document.getElementById("weather-temperature"),

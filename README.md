@@ -73,6 +73,7 @@ Die Defaults liegen in `config/default.yaml`. Secrets und gerätespezifische Wer
 Wichtige Schlüssel:
 
 - `APP_LOCALE`, `APP_TIMEZONE`
+- `APP_WATCH_FACE` — Start-Uhr-Stil (`classic`, `qlocktwo`, `analog`); per Touch auf die Hero-Uhr durchschaltbar, Auswahl persistiert im Browser
 - `WEATHER_LATITUDE`, `WEATHER_LONGITUDE`, `WEATHER_LABEL`
 - `CALENDAR_URL`, `CALENDAR_USERNAME`, `CALENDAR_PASSWORD`, `CALENDAR_NAME`
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, `SPOTIFY_DEVICE_ID`

@@ -53,6 +53,14 @@ class QlocktwoActiveCellsTest(unittest.TestCase):
         self.assertEqual(qlocktwo_phrase(7, 0), "ES IST SIEBEN UHR")
         self.assertEqual(qlocktwo_phrase(1, 0), "ES IST EIN UHR")
 
+    def test_hour_one_uses_eins_outside_of_uhr(self) -> None:
+        # Only "1:00" drops the S ("ein Uhr"). Every other phrase referring to
+        # the one o'clock hour must say "eins".
+        self.assertEqual(qlocktwo_phrase(12, 45), "ES IST VIERTEL VOR EINS")
+        self.assertEqual(qlocktwo_phrase(12, 30), "ES IST HALB EINS")
+        self.assertEqual(qlocktwo_phrase(1, 15), "ES IST VIERTEL NACH EINS")
+        self.assertEqual(qlocktwo_phrase(1, 30), "ES IST HALB ZWEI")
+
     def test_midnight_is_zwoelf(self) -> None:
         # 24h zero hour must fold to 12 for the word clock.
         self.assertEqual(qlocktwo_phrase(0, 0), "ES IST ZWÖLF UHR")
@@ -106,9 +114,18 @@ class AnalogHandAnglesTest(unittest.TestCase):
         angles = analog_hand_angles(12, 0)
         self.assertAlmostEqual(angles["hour"], 0.0)
         self.assertAlmostEqual(angles["minute"], 0.0)
+        self.assertAlmostEqual(angles["second"], 0.0)
         # Midnight (24h hour = 0) must also fold to the top.
         angles = analog_hand_angles(0, 0)
         self.assertAlmostEqual(angles["hour"], 0.0)
+
+    def test_second_hand_advances_six_degrees_per_second(self) -> None:
+        self.assertAlmostEqual(analog_hand_angles(12, 0, 0)["second"], 0.0)
+        self.assertAlmostEqual(analog_hand_angles(12, 0, 15)["second"], 90.0)
+        self.assertAlmostEqual(analog_hand_angles(12, 0, 30)["second"], 180.0)
+        self.assertAlmostEqual(analog_hand_angles(12, 0, 59)["second"], 354.0)
+        # Default second=0 keeps back-compat for callers that don't track it.
+        self.assertAlmostEqual(analog_hand_angles(12, 0)["second"], 0.0)
 
     def test_three_oclock_points_right(self) -> None:
         angles = analog_hand_angles(3, 0)

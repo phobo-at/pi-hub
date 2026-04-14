@@ -51,6 +51,7 @@ Wichtige aktuelle UI-Entscheidungen:
 - Status-Badges werden im Normalzustand nicht angezeigt
 - Kalender zeigt heute, morgen und übermorgen, aber nur so viel wie in den verfügbaren Platz passt
 - Spotify zeigt Transport-Controls nur bei sinnvoll steuerbarer Session
+- Die Hero-Uhr ist per Touch umschaltbar zwischen `classic` (digital), `qlocktwo` (deutsches Wortuhr-Raster) und `analog` (SVG). Start-Face kommt aus `app.watch_face` bzw. `APP_WATCH_FACE`, die Nutzerwahl persistiert im `localStorage` — kein Server-Roundtrip.
 
 Diese Entscheidungen nicht versehentlich zurückbauen.
 

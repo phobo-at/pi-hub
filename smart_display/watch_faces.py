@@ -22,17 +22,21 @@ VALID_WATCH_FACES: frozenset[str] = frozenset({"classic", "qlocktwo", "analog"})
 DEFAULT_WATCH_FACE = "classic"
 
 
-def analog_hand_angles(hour: int, minute: int) -> dict[str, float]:
-    """Return the hour/minute hand rotations in degrees for the analog face.
+def analog_hand_angles(hour: int, minute: int, second: int = 0) -> dict[str, float]:
+    """Return the hour/minute/second hand rotations in degrees.
 
     The hour hand advances continuously with the minute (``hour * 30`` plus
     ``minute * 0.5``) so that e.g. 7:30 sits exactly between 7 and 8. The
-    minute hand is a simple ``minute * 6``. Degrees are modulo-360 floats so
-    the frontend can ``setAttribute('transform', ...)`` without extra math.
+    minute hand is a simple ``minute * 6``, and the second hand ``second *
+    6``. Degrees are modulo-360 floats so the frontend can
+    ``setAttribute('transform', ...)`` without extra math. ``second``
+    defaults to ``0`` so the server-rendered initial frame stays stable
+    across a render even if the wall clock advances mid-response.
     """
     hour_deg = ((hour % 12) * 30 + minute * 0.5) % 360
     minute_deg = (minute * 6) % 360
-    return {"hour": hour_deg, "minute": minute_deg}
+    second_deg = (second * 6) % 360
+    return {"hour": hour_deg, "minute": minute_deg, "second": second_deg}
 
 
 # 11 columns × 10 rows. Real umlauts, as required by the project conventions.
@@ -65,10 +69,14 @@ _VOR = (3, 6, 3)
 _HALB = (4, 0, 4)
 _UHR = (9, 8, 3)
 
-# Hour words. "EIN" rather than "EINS" because it is always followed by
-# "UHR" or "HALB"/minute context where the short form is idiomatic.
+# Hour words. For hour 1 we carry two variants: the short "EIN" used only
+# in the literal "EIN UHR" phrase at the full hour, and the long "EINS"
+# used everywhere else ("halb eins", "viertel vor eins"). German grammar —
+# not a stylistic choice.
+_EIN = (5, 2, 3)      # EIN  (shares letters with ZWEI / SIEBEN row)
+_EINS = (5, 2, 4)     # EINS (extends EIN into the first letter of SIEBEN)
 _HOUR_WORDS: dict[int, tuple[int, int, int]] = {
-    1: (5, 2, 3),      # EIN  (shares letters with ZWEI)
+    1: _EINS,          # default form; overridden to _EIN when paired with UHR
     2: (5, 0, 4),      # ZWEI
     3: (6, 1, 4),      # DREI
     4: (7, 7, 4),      # VIER
@@ -81,6 +89,12 @@ _HOUR_WORDS: dict[int, tuple[int, int, int]] = {
     11: (7, 0, 3),     # ELF
     12: (4, 5, 5),     # ZWÖLF
 }
+
+
+def _hour_word(hour_12: int, with_uhr: bool) -> tuple[int, int, int]:
+    if hour_12 == 1 and with_uhr:
+        return _EIN
+    return _HOUR_WORDS[hour_12]
 
 
 def normalize_watch_face(value: str | None) -> str:
@@ -117,29 +131,29 @@ def qlocktwo_active_cells(hour: int, minute: int) -> list[list[int]]:
 
     words: list[tuple[int, int, int]] = [_ES, _IST]
     if block == 0:
-        words += [_HOUR_WORDS[this_hour], _UHR]
+        words += [_hour_word(this_hour, with_uhr=True), _UHR]
     elif block == 5:
-        words += [_FUENF_MIN, _NACH, _HOUR_WORDS[this_hour]]
+        words += [_FUENF_MIN, _NACH, _hour_word(this_hour, with_uhr=False)]
     elif block == 10:
-        words += [_ZEHN_MIN, _NACH, _HOUR_WORDS[this_hour]]
+        words += [_ZEHN_MIN, _NACH, _hour_word(this_hour, with_uhr=False)]
     elif block == 15:
-        words += [_VIERTEL, _NACH, _HOUR_WORDS[this_hour]]
+        words += [_VIERTEL, _NACH, _hour_word(this_hour, with_uhr=False)]
     elif block == 20:
-        words += [_ZWANZIG_MIN, _NACH, _HOUR_WORDS[this_hour]]
+        words += [_ZWANZIG_MIN, _NACH, _hour_word(this_hour, with_uhr=False)]
     elif block == 25:
-        words += [_FUENF_MIN, _VOR, _HALB, _HOUR_WORDS[next_hour]]
+        words += [_FUENF_MIN, _VOR, _HALB, _hour_word(next_hour, with_uhr=False)]
     elif block == 30:
-        words += [_HALB, _HOUR_WORDS[next_hour]]
+        words += [_HALB, _hour_word(next_hour, with_uhr=False)]
     elif block == 35:
-        words += [_FUENF_MIN, _NACH, _HALB, _HOUR_WORDS[next_hour]]
+        words += [_FUENF_MIN, _NACH, _HALB, _hour_word(next_hour, with_uhr=False)]
     elif block == 40:
-        words += [_ZWANZIG_MIN, _VOR, _HOUR_WORDS[next_hour]]
+        words += [_ZWANZIG_MIN, _VOR, _hour_word(next_hour, with_uhr=False)]
     elif block == 45:
-        words += [_VIERTEL, _VOR, _HOUR_WORDS[next_hour]]
+        words += [_VIERTEL, _VOR, _hour_word(next_hour, with_uhr=False)]
     elif block == 50:
-        words += [_ZEHN_MIN, _VOR, _HOUR_WORDS[next_hour]]
+        words += [_ZEHN_MIN, _VOR, _hour_word(next_hour, with_uhr=False)]
     elif block == 55:
-        words += [_FUENF_MIN, _VOR, _HOUR_WORDS[next_hour]]
+        words += [_FUENF_MIN, _VOR, _hour_word(next_hour, with_uhr=False)]
 
     cells: set[tuple[int, int]] = set()
     for word in words:
