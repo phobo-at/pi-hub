@@ -80,6 +80,16 @@ Wichtige Schlüssel:
 
 ## Betrieb auf dem Pi
 
+Einfachster Weg auf frischem Raspberry Pi OS Bookworm Lite: Repo clonen und `scripts/install-pi.sh` ausführen. Das Script installiert X11-/Kiosk-Pakete, legt venv an, setzt `Xwrapper.config`, deployt nach `/opt/smart-display` und aktiviert beide systemd-Units.
+
+```bash
+sudo bash scripts/install-pi.sh
+```
+
+Danach `.env` unter `/opt/smart-display/.env` mit Credentials füllen und rebooten.
+
+Manuelle Schritte (falls nicht über das Script):
+
 1. Raspberry Pi OS Bookworm Lite installieren
 2. Minimales X11-/Kiosk-Setup installieren:
 

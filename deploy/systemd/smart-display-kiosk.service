@@ -1,18 +1,16 @@
 [Unit]
 Description=Smart Display kiosk session
-After=systemd-user-sessions.service smart-display.service
+After=network-online.target smart-display.service
 Requires=smart-display.service
 
 [Service]
 Type=simple
 User=pi
 Group=pi
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/pi/.Xauthority
-ExecStart=/opt/smart-display/deploy/x11/kiosk-session.sh
+ExecStart=/usr/bin/xinit /opt/smart-display/deploy/x11/kiosk-session.sh -- :0 vt1 -nolisten tcp
 Restart=always
-RestartSec=3
+RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target
 
