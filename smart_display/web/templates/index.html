@@ -15,8 +15,54 @@
       <section class="hero-panel">
         <div class="hero-panel__inner">
           <button type="button" class="watch-face" id="watch-face" aria-label="Uhrzeit-Stil wechseln">
-            <div class="watch-face__classic" id="watch-face-classic">
-              <div class="hero-time" id="clock-time">{{ initial_clock.time }}</div>
+            <div class="watch-face__flip" id="watch-face-flip">
+              <div class="flip-clock">
+                {%- for position, idx in [("h1", 0), ("h2", 1), ("m1", 2), ("m2", 3)] -%}
+                  <div class="flip-digit" id="flip-{{ position }}" data-value="{{ time_digits[idx] }}">
+                    <div class="flip-digit__half flip-digit__half--top"><span class="flip-digit__digit">{{ time_digits[idx] }}</span></div>
+                    <div class="flip-digit__half flip-digit__half--bottom"><span class="flip-digit__digit">{{ time_digits[idx] }}</span></div>
+                    <div class="flip-digit__flap flip-digit__flap--top" aria-hidden="true"><span class="flip-digit__digit"></span></div>
+                    <div class="flip-digit__flap flip-digit__flap--bottom" aria-hidden="true"><span class="flip-digit__digit"></span></div>
+                  </div>
+                  {%- if position == "h2" -%}
+                    <div class="flip-clock__sep" aria-hidden="true"><span></span><span></span></div>
+                  {%- endif -%}
+                {%- endfor -%}
+              </div>
+            </div>
+            <div class="watch-face__lcd" id="watch-face-lcd" aria-hidden="true">
+              <svg class="lcd-clock" viewBox="0 0 400 160" role="img" aria-label="Digitaluhr">
+                {%- set lcd_rects = [
+                  ("a", 14, 4, 52, 8),
+                  ("b", 66, 14, 8, 52),
+                  ("c", 66, 74, 8, 52),
+                  ("d", 14, 128, 52, 8),
+                  ("e", 6, 74, 8, 52),
+                  ("f", 6, 14, 8, 52),
+                  ("g", 14, 66, 52, 8),
+                ] -%}
+                {%- set lcd_positions = [("h1", 0), ("h2", 90), ("m1", 230), ("m2", 320)] -%}
+                {%- for position, x in lcd_positions -%}
+                  {%- set digit = lcd_digits[loop.index0] -%}
+                  <g class="lcd-digit" id="lcd-{{ position }}" data-value="{{ digit.value }}" transform="translate({{ x }}, 8)">
+                    {%- for seg, rx, ry, rw, rh in lcd_rects -%}
+                      <rect class="lcd-seg{% if seg in digit.segments %} is-on{% endif %}" data-seg="{{ seg }}" x="{{ rx }}" y="{{ ry }}" width="{{ rw }}" height="{{ rh }}" rx="2"></rect>
+                    {%- endfor -%}
+                  </g>
+                {%- endfor -%}
+                <g class="lcd-colon" aria-hidden="true">
+                  <circle cx="210" cy="70" r="6"></circle>
+                  <circle cx="210" cy="106" r="6"></circle>
+                </g>
+              </svg>
+            </div>
+            <div class="watch-face__pulse" id="watch-face-pulse" aria-hidden="true">
+              <div class="pulse-clock">
+                <span class="pulse-clock__hm">
+                  <span id="pulse-hh">{{ initial_clock.time[:2] }}</span><span class="pulse-clock__colon">:</span><span id="pulse-mm">{{ initial_clock.time[3:] }}</span>
+                </span>
+                <span class="pulse-clock__ss" aria-hidden="true"><span class="pulse-clock__ss-sep">:</span><span id="pulse-ss">{{ initial_clock.seconds }}</span></span>
+              </div>
             </div>
             <div class="watch-face__analog" id="watch-face-analog" aria-hidden="true">
               <svg class="analog-clock" viewBox="0 0 200 200" role="img" aria-label="Analoge Uhr" focusable="false">
@@ -46,6 +92,19 @@
                     {%- set col_idx = loop.index0 -%}
                     {%- set cell_key = row_idx|string ~ "," ~ col_idx|string -%}
                     <span class="qlocktwo-letter{% if cell_key in active_keys %} is-active{% endif %}" data-row="{{ row_idx }}" data-col="{{ col_idx }}">{{ letter }}</span>
+                  {%- endfor -%}
+                </div>
+              {%- endfor -%}
+            </div>
+            <div class="watch-face__qlocktwo-ooe" id="watch-face-qlocktwo-ooe" aria-hidden="true">
+              {%- set active_keys_ooe = qlocktwo_ooe_active|map("join", ",")|list -%}
+              {%- for row in qlocktwo_ooe_grid -%}
+                {%- set row_idx = loop.index0 -%}
+                <div class="qlocktwo-row">
+                  {%- for letter in row -%}
+                    {%- set col_idx = loop.index0 -%}
+                    {%- set cell_key = row_idx|string ~ "," ~ col_idx|string -%}
+                    <span class="qlocktwo-letter{% if cell_key in active_keys_ooe %} is-active{% endif %}" data-row="{{ row_idx }}" data-col="{{ col_idx }}">{{ letter }}</span>
                   {%- endfor -%}
                 </div>
               {%- endfor -%}

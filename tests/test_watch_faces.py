@@ -6,24 +6,34 @@ from smart_display.watch_faces import (
     DEFAULT_WATCH_FACE,
     QLOCKTWO_COLS,
     QLOCKTWO_GRID,
+    QLOCKTWO_OOE_COLS,
+    QLOCKTWO_OOE_GRID,
+    QLOCKTWO_OOE_ROWS,
     QLOCKTWO_ROWS,
     VALID_WATCH_FACES,
     analog_hand_angles,
     normalize_watch_face,
     qlocktwo_active_cells,
+    qlocktwo_ooe_active_cells,
+    qlocktwo_ooe_phrase,
     qlocktwo_phrase,
 )
 
 
 class NormalizeWatchFaceTest(unittest.TestCase):
     def test_accepts_known_values(self) -> None:
-        self.assertEqual(normalize_watch_face("classic"), "classic")
+        self.assertEqual(normalize_watch_face("flip"), "flip")
+        self.assertEqual(normalize_watch_face("lcd"), "lcd")
+        self.assertEqual(normalize_watch_face("pulse"), "pulse")
         self.assertEqual(normalize_watch_face("qlocktwo"), "qlocktwo")
+        self.assertEqual(normalize_watch_face("qlocktwo-ooe"), "qlocktwo-ooe")
         self.assertEqual(normalize_watch_face("analog"), "analog")
 
     def test_falls_back_for_unknown_or_missing(self) -> None:
         self.assertEqual(normalize_watch_face(None), DEFAULT_WATCH_FACE)
         self.assertEqual(normalize_watch_face(""), DEFAULT_WATCH_FACE)
+        # Legacy face name from before the 2026-04 refresh maps to default.
+        self.assertEqual(normalize_watch_face("classic"), DEFAULT_WATCH_FACE)
         self.assertEqual(normalize_watch_face("retro-flip"), DEFAULT_WATCH_FACE)
 
     def test_default_face_is_registered(self) -> None:
@@ -107,6 +117,97 @@ class QlocktwoActiveCellsTest(unittest.TestCase):
             self.assertEqual(len(entry), 2)
             self.assertIsInstance(entry[0], int)
             self.assertIsInstance(entry[1], int)
+
+
+class QlocktwoOoeGridShapeTest(unittest.TestCase):
+    def test_grid_is_rectangular(self) -> None:
+        self.assertEqual(QLOCKTWO_OOE_ROWS, 10)
+        self.assertEqual(QLOCKTWO_OOE_COLS, 11)
+        for row in QLOCKTWO_OOE_GRID:
+            self.assertEqual(len(row), QLOCKTWO_OOE_COLS)
+
+    def test_grid_uses_real_umlauts(self) -> None:
+        joined = "".join(QLOCKTWO_OOE_GRID)
+        self.assertIn("Ü", joined)
+        self.assertIn("Ö", joined)
+
+
+class QlocktwoOoeActiveCellsTest(unittest.TestCase):
+    """Dialect phrases. Matches the 'Standard Viertel nach' scheme:
+    13:15 → VIERTL NOCH OANS, 13:45 → VIERTL VOR ZWA. UHR is dropped."""
+
+    def test_full_hour_reads_es_is_hour(self) -> None:
+        self.assertEqual(qlocktwo_ooe_phrase(12, 0), "ES IS ZWÖFE")
+        self.assertEqual(qlocktwo_ooe_phrase(1, 0), "ES IS OANS")
+        self.assertEqual(qlocktwo_ooe_phrase(7, 0), "ES IS SIEBNE")
+        self.assertEqual(qlocktwo_ooe_phrase(4, 0), "ES IS VIERE")
+        self.assertEqual(qlocktwo_ooe_phrase(9, 0), "ES IS NEINE")
+        self.assertEqual(qlocktwo_ooe_phrase(11, 0), "ES IS ELF")
+
+    def test_five_minute_phrases_around_one(self) -> None:
+        self.assertEqual(qlocktwo_ooe_phrase(13, 5), "ES IS FÜMF NOCH OANS")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 10), "ES IS ZEHN NOCH OANS")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 15), "ES IS VIERTL NOCH OANS")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 20), "ES IS ZWANZG NOCH OANS")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 25), "ES IS FÜMF VOR HOIBE ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 30), "ES IS HOIBE ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 35), "ES IS FÜMF NOCH HOIBE ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 40), "ES IS ZWANZG VOR ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 45), "ES IS VIERTL VOR ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 50), "ES IS ZEHN VOR ZWOA")
+        self.assertEqual(qlocktwo_ooe_phrase(13, 55), "ES IS FÜMF VOR ZWOA")
+
+    def test_drei_hour_does_not_collide_with_viertl(self) -> None:
+        # Regression: DREI used to live on row 2 next to VIERTL, which at
+        # 3:15 produced the misleading "DREIVIERTL" run on one line. DREI
+        # now lives on row 7, safely after NOCH/VOR in reading order.
+        self.assertEqual(qlocktwo_ooe_phrase(3, 15), "ES IS VIERTL NOCH DREI")
+        self.assertEqual(qlocktwo_ooe_phrase(3, 45), "ES IS VIERTL VOR VIERE")
+        self.assertNotIn("DREIVIERTL", qlocktwo_ooe_phrase(3, 15))
+
+    def test_midnight_folds_to_zwoefe(self) -> None:
+        self.assertEqual(qlocktwo_ooe_phrase(0, 0), "ES IS ZWÖFE")
+
+    def test_half_past_rolls_hour_forward(self) -> None:
+        # 12:30 → "halb eins" → HOIBE OANS
+        self.assertEqual(qlocktwo_ooe_phrase(12, 30), "ES IS HOIBE OANS")
+        # 7:30 → HOIBE OCHT
+        self.assertEqual(qlocktwo_ooe_phrase(7, 30), "ES IS HOIBE OCHT")
+
+    def test_minute_blocks_round_down_to_five(self) -> None:
+        self.assertEqual(qlocktwo_ooe_phrase(7, 32), "ES IS HOIBE OCHT")
+        self.assertEqual(qlocktwo_ooe_phrase(7, 34), "ES IS HOIBE OCHT")
+
+    def test_no_uhr_at_full_hour(self) -> None:
+        # Regression guard: UHR is deliberately absent from the OÖ grid.
+        self.assertNotIn("UHR", qlocktwo_ooe_phrase(12, 0))
+        self.assertNotIn("UHR", qlocktwo_ooe_phrase(1, 0))
+
+    def test_all_twelve_hours_have_unique_coords(self) -> None:
+        # Sanity: every hour from 1..12 maps to a distinct set of cells so the
+        # grid cannot accidentally light the wrong hour word.
+        signatures: set[tuple[tuple[int, int], ...]] = set()
+        for hour in range(1, 13):
+            cells = qlocktwo_ooe_active_cells(hour, 0)
+            # Drop ES / IS — they are constant across hours.
+            trimmed = tuple(
+                sorted((r, c) for r, c in cells if (r, c) not in {
+                    (0, 0), (0, 1), (0, 3), (0, 4),
+                })
+            )
+            signatures.add(trimmed)
+        self.assertEqual(len(signatures), 12)
+
+    def test_cells_are_unique_and_in_range(self) -> None:
+        for hour in range(24):
+            for minute in (0, 5, 15, 25, 30, 45, 55):
+                cells = qlocktwo_ooe_active_cells(hour, minute)
+                seen: set[tuple[int, int]] = set()
+                for row, col in cells:
+                    self.assertTrue(0 <= row < QLOCKTWO_OOE_ROWS)
+                    self.assertTrue(0 <= col < QLOCKTWO_OOE_COLS)
+                    seen.add((row, col))
+                self.assertEqual(len(seen), len(cells))
 
 
 class AnalogHandAnglesTest(unittest.TestCase):

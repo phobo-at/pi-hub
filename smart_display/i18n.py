@@ -42,5 +42,6 @@ def format_initial_clock(
     month = GERMAN_MONTHS_LONG[current.month - 1]
     return {
         "time": current.strftime("%H:%M"),
-        "date": f"{weekday}, {current.day}. {month}",
+        "seconds": current.strftime("%S"),
+        "date": f"{weekday} · {current.day}. {month}",
     }

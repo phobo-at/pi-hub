@@ -77,15 +77,62 @@
     11: [7, 0, 3],
     12: [4, 5, 5],
   };
-  const VALID_WATCH_FACES = ["classic", "qlocktwo", "analog"];
+  // OÖ dialect variant — mirrors smart_display/watch_faces.QLOCKTWO_OOE_*.
+  // Same 10×11 geometry, no UHR, no EIN/EINS split.
+  const QLOCKTWO_OOE_WORDS = {
+    ES: [0, 0, 2],
+    IS: [0, 3, 2],
+    FUEMF_MIN: [0, 7, 4],
+    ZEHN_MIN: [1, 0, 4],
+    ZWANZG_MIN: [1, 5, 6],
+    VIERTL: [2, 4, 6],
+    NOCH: [3, 2, 4],
+    VOR: [3, 7, 3],
+    HOIBE: [4, 0, 5],
+  };
+  const QLOCKTWO_OOE_HOUR_WORDS = {
+    1: [7, 0, 4],   // OANS
+    2: [7, 4, 4],   // ZWOA
+    3: [5, 0, 4],   // DREI
+    4: [9, 6, 5],   // VIERE
+    5: [6, 7, 4],   // FÜMF (hour)
+    6: [9, 0, 6],   // SECHSE
+    7: [6, 0, 6],   // SIEBNE
+    8: [8, 1, 4],   // OCHT
+    9: [5, 5, 5],   // NEINE
+    10: [8, 5, 5],  // ZEHNE
+    11: [7, 8, 3],  // ELF
+    12: [4, 5, 5],  // ZWÖFE
+  };
+  const VALID_WATCH_FACES = ["flip", "lcd", "pulse", "qlocktwo", "qlocktwo-ooe", "analog"];
   const WATCH_FACE_LABELS = {
-    classic: "Klassisch",
+    flip: "Flip",
+    lcd: "LCD",
+    pulse: "Puls",
     qlocktwo: "Wortuhr",
+    "qlocktwo-ooe": "Wortuhr OÖ",
     analog: "Analog",
+  };
+  // Segment map for the LCD face. Mirrors watch_faces.LCD_SEGMENT_MAP —
+  // server-rendered initial state uses the Python side, subsequent ticks use
+  // this one, so keep them in sync.
+  const LCD_SEGMENT_MAP = {
+    "0": "abcdef",
+    "1": "bc",
+    "2": "abdeg",
+    "3": "abcdg",
+    "4": "bcfg",
+    "5": "acdfg",
+    "6": "acdefg",
+    "7": "abc",
+    "8": "abcdefg",
+    "9": "abcdfg",
   };
   const WATCH_FACE_STORAGE_KEY = "sd.watch_face";
   let qlocktwoLetterIndex = null;
   let lastQlocktwoKey = "";
+  let qlocktwoOoeLetterIndex = null;
+  let lastQlocktwoOoeKey = "";
 
   function qlocktwoHour12(hour24) {
     const h = ((hour24 % 12) + 12) % 12;
@@ -157,12 +204,77 @@
     return keys;
   }
 
-  function buildQlocktwoLetterIndex() {
-    if (!nodes.qlocktwo) {
+  function qlocktwoOoeActiveKeys(hour, minute) {
+    const block = Math.floor(minute / 5) * 5;
+    const thisHour = qlocktwoHour12(hour);
+    const nextHour = qlocktwoHour12(hour + 1);
+    const words = [QLOCKTWO_OOE_WORDS.ES, QLOCKTWO_OOE_WORDS.IS];
+    switch (block) {
+      case 0:
+        words.push(QLOCKTWO_OOE_HOUR_WORDS[thisHour]);
+        break;
+      case 5:
+        words.push(QLOCKTWO_OOE_WORDS.FUEMF_MIN, QLOCKTWO_OOE_WORDS.NOCH, QLOCKTWO_OOE_HOUR_WORDS[thisHour]);
+        break;
+      case 10:
+        words.push(QLOCKTWO_OOE_WORDS.ZEHN_MIN, QLOCKTWO_OOE_WORDS.NOCH, QLOCKTWO_OOE_HOUR_WORDS[thisHour]);
+        break;
+      case 15:
+        words.push(QLOCKTWO_OOE_WORDS.VIERTL, QLOCKTWO_OOE_WORDS.NOCH, QLOCKTWO_OOE_HOUR_WORDS[thisHour]);
+        break;
+      case 20:
+        words.push(QLOCKTWO_OOE_WORDS.ZWANZG_MIN, QLOCKTWO_OOE_WORDS.NOCH, QLOCKTWO_OOE_HOUR_WORDS[thisHour]);
+        break;
+      case 25:
+        words.push(
+          QLOCKTWO_OOE_WORDS.FUEMF_MIN,
+          QLOCKTWO_OOE_WORDS.VOR,
+          QLOCKTWO_OOE_WORDS.HOIBE,
+          QLOCKTWO_OOE_HOUR_WORDS[nextHour],
+        );
+        break;
+      case 30:
+        words.push(QLOCKTWO_OOE_WORDS.HOIBE, QLOCKTWO_OOE_HOUR_WORDS[nextHour]);
+        break;
+      case 35:
+        words.push(
+          QLOCKTWO_OOE_WORDS.FUEMF_MIN,
+          QLOCKTWO_OOE_WORDS.NOCH,
+          QLOCKTWO_OOE_WORDS.HOIBE,
+          QLOCKTWO_OOE_HOUR_WORDS[nextHour],
+        );
+        break;
+      case 40:
+        words.push(QLOCKTWO_OOE_WORDS.ZWANZG_MIN, QLOCKTWO_OOE_WORDS.VOR, QLOCKTWO_OOE_HOUR_WORDS[nextHour]);
+        break;
+      case 45:
+        words.push(QLOCKTWO_OOE_WORDS.VIERTL, QLOCKTWO_OOE_WORDS.VOR, QLOCKTWO_OOE_HOUR_WORDS[nextHour]);
+        break;
+      case 50:
+        words.push(QLOCKTWO_OOE_WORDS.ZEHN_MIN, QLOCKTWO_OOE_WORDS.VOR, QLOCKTWO_OOE_HOUR_WORDS[nextHour]);
+        break;
+      case 55:
+        words.push(QLOCKTWO_OOE_WORDS.FUEMF_MIN, QLOCKTWO_OOE_WORDS.VOR, QLOCKTWO_OOE_HOUR_WORDS[nextHour]);
+        break;
+      default:
+        break;
+    }
+    const keys = new Set();
+    for (const word of words) {
+      const [row, col, length] = word;
+      for (let i = 0; i < length; i += 1) {
+        keys.add(`${row},${col + i}`);
+      }
+    }
+    return keys;
+  }
+
+  function buildLetterIndex(container) {
+    if (!container) {
       return null;
     }
     const map = new Map();
-    const letters = nodes.qlocktwo.querySelectorAll(".qlocktwo-letter");
+    const letters = container.querySelectorAll(".qlocktwo-letter");
     letters.forEach((letter) => {
       const row = letter.dataset.row;
       const col = letter.dataset.col;
@@ -173,13 +285,16 @@
     return map;
   }
 
-  function updateQlocktwo(force) {
-    if (!nodes.qlocktwo) {
-      return;
-    }
+  function buildQlocktwoLetterIndex() {
+    return buildLetterIndex(nodes.qlocktwo);
+  }
+
+  function buildQlocktwoOoeLetterIndex() {
+    return buildLetterIndex(nodes.qlocktwoOoe);
+  }
+
+  function currentHourMinute() {
     const now = new Date();
-    // Resolve the timezone via the cached time formatter so the word clock
-    // follows the same zone as the classic clock.
     const parts = CLOCK_TIME_FMT.formatToParts(now);
     let hour = now.getHours();
     let minute = now.getMinutes();
@@ -190,6 +305,14 @@
         minute = Number(part.value);
       }
     }
+    return { hour, minute };
+  }
+
+  function updateQlocktwo(force) {
+    if (!nodes.qlocktwo) {
+      return;
+    }
+    const { hour, minute } = currentHourMinute();
     const block = Math.floor(minute / 5) * 5;
     const key = `${hour}:${block}`;
     if (!force && key === lastQlocktwoKey) {
@@ -204,6 +327,32 @@
     }
     const activeKeys = qlocktwoActiveKeys(hour, minute);
     qlocktwoLetterIndex.forEach((letter, cellKey) => {
+      const active = activeKeys.has(cellKey);
+      if (active !== letter.classList.contains("is-active")) {
+        letter.classList.toggle("is-active", active);
+      }
+    });
+  }
+
+  function updateQlocktwoOoe(force) {
+    if (!nodes.qlocktwoOoe) {
+      return;
+    }
+    const { hour, minute } = currentHourMinute();
+    const block = Math.floor(minute / 5) * 5;
+    const key = `${hour}:${block}`;
+    if (!force && key === lastQlocktwoOoeKey) {
+      return;
+    }
+    lastQlocktwoOoeKey = key;
+    if (!qlocktwoOoeLetterIndex) {
+      qlocktwoOoeLetterIndex = buildQlocktwoOoeLetterIndex();
+    }
+    if (!qlocktwoOoeLetterIndex) {
+      return;
+    }
+    const activeKeys = qlocktwoOoeActiveKeys(hour, minute);
+    qlocktwoOoeLetterIndex.forEach((letter, cellKey) => {
       const active = activeKeys.has(cellKey);
       if (active !== letter.classList.contains("is-active")) {
         letter.classList.toggle("is-active", active);
@@ -282,37 +431,197 @@
     if (configured && VALID_WATCH_FACES.includes(configured)) {
       return configured;
     }
-    return "classic";
+    return "flip";
+  }
+
+  // --- Flip clock ---------------------------------------------------------
+  // Track pending timeouts per digit so rapid ticks can't leave a card mid-
+  // flip (e.g. if the system clock jumps).
+  const flipCleanupTimers = new Map();
+
+  function flipDigitTo(card, newValue, animate) {
+    if (!card) return;
+    const oldValue = card.dataset.value || "";
+    if (oldValue === newValue) return;
+    const staticTop = card.querySelector(".flip-digit__half--top .flip-digit__digit");
+    const staticBottom = card.querySelector(".flip-digit__half--bottom .flip-digit__digit");
+    const flapTop = card.querySelector(".flip-digit__flap--top .flip-digit__digit");
+    const flapBottom = card.querySelector(".flip-digit__flap--bottom .flip-digit__digit");
+    if (!staticTop || !staticBottom) return;
+    card.dataset.value = newValue;
+    // Static top shows the new digit instantly — it's covered by flap--top
+    // (showing the old digit) until the flap rotates away, then revealed.
+    staticTop.textContent = newValue;
+    if (!animate) {
+      staticBottom.textContent = newValue;
+      return;
+    }
+    if (flapTop) flapTop.textContent = oldValue;
+    if (flapBottom) flapBottom.textContent = newValue;
+    const pending = flipCleanupTimers.get(card);
+    if (pending) window.clearTimeout(pending);
+    card.classList.remove("is-flipping");
+    // Force a reflow so the animation restart actually re-runs the keyframes.
+    void card.offsetWidth;
+    card.classList.add("is-flipping");
+    const timer = window.setTimeout(() => {
+      staticBottom.textContent = newValue;
+      card.classList.remove("is-flipping");
+      flipCleanupTimers.delete(card);
+    }, 640);
+    flipCleanupTimers.set(card, timer);
+  }
+
+  function updateFlip(force) {
+    if (!nodes.flipCards) return;
+    const now = new Date();
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = String(now.getHours()).padStart(2, "0");
+    let minute = String(now.getMinutes()).padStart(2, "0");
+    for (const part of parts) {
+      if (part.type === "hour") hour = part.value.padStart(2, "0");
+      else if (part.type === "minute") minute = part.value.padStart(2, "0");
+    }
+    const digits = [hour[0], hour[1], minute[0], minute[1]];
+    const cards = [nodes.flipCards.h1, nodes.flipCards.h2, nodes.flipCards.m1, nodes.flipCards.m2];
+    for (let i = 0; i < 4; i += 1) {
+      flipDigitTo(cards[i], digits[i], !force);
+    }
+  }
+
+  // --- LCD ---------------------------------------------------------------
+  function setLcdDigit(group, value) {
+    if (!group) return;
+    if (group.dataset.value === value) return;
+    const active = LCD_SEGMENT_MAP[value] || "";
+    const rects = group.querySelectorAll(".lcd-seg");
+    rects.forEach((rect) => {
+      const seg = rect.dataset.seg || "";
+      const on = active.includes(seg);
+      if (on !== rect.classList.contains("is-on")) {
+        rect.classList.toggle("is-on", on);
+      }
+    });
+    group.dataset.value = value;
+  }
+
+  function updateLcd(force) {
+    if (!nodes.lcdGroups) return;
+    const now = new Date();
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = String(now.getHours()).padStart(2, "0");
+    let minute = String(now.getMinutes()).padStart(2, "0");
+    for (const part of parts) {
+      if (part.type === "hour") hour = part.value.padStart(2, "0");
+      else if (part.type === "minute") minute = part.value.padStart(2, "0");
+    }
+    const digits = [hour[0], hour[1], minute[0], minute[1]];
+    const groups = [nodes.lcdGroups.h1, nodes.lcdGroups.h2, nodes.lcdGroups.m1, nodes.lcdGroups.m2];
+    for (let i = 0; i < 4; i += 1) {
+      const group = groups[i];
+      if (!group) continue;
+      if (force || group.dataset.value !== digits[i]) {
+        setLcdDigit(group, digits[i]);
+      }
+    }
+  }
+
+  // --- Pulse -------------------------------------------------------------
+  let pulseSecondTimer = null;
+
+  function updatePulse(force) {
+    if (!nodes.pulseHh || !nodes.pulseMm || !nodes.pulseSs) return;
+    const now = new Date();
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = String(now.getHours()).padStart(2, "0");
+    let minute = String(now.getMinutes()).padStart(2, "0");
+    for (const part of parts) {
+      if (part.type === "hour") hour = part.value.padStart(2, "0");
+      else if (part.type === "minute") minute = part.value.padStart(2, "0");
+    }
+    if (force || nodes.pulseHh.textContent !== hour) {
+      nodes.pulseHh.textContent = hour;
+    }
+    if (force || nodes.pulseMm.textContent !== minute) {
+      nodes.pulseMm.textContent = minute;
+    }
+    const seconds = String(now.getSeconds()).padStart(2, "0");
+    if (nodes.pulseSs.textContent !== seconds) {
+      nodes.pulseSs.textContent = seconds;
+    }
+  }
+
+  function startPulseSecondTick() {
+    if (pulseSecondTimer !== null) return;
+    const msUntilNextSecond = 1000 - (Date.now() % 1000);
+    pulseSecondTimer = window.setTimeout(function tick() {
+      updatePulse(false);
+      pulseSecondTimer = window.setTimeout(tick, 1000);
+    }, msUntilNextSecond + 10);
+  }
+
+  function stopPulseSecondTick() {
+    if (pulseSecondTimer !== null) {
+      window.clearTimeout(pulseSecondTimer);
+      pulseSecondTimer = null;
+    }
   }
 
   function applyWatchFace(face) {
-    const next = VALID_WATCH_FACES.includes(face) ? face : "classic";
+    const next = VALID_WATCH_FACES.includes(face) ? face : "flip";
     document.body.setAttribute("data-watch-face", next);
+    const isInteractive = next === "qlocktwo" || next === "qlocktwo-ooe";
     if (nodes.watchFace) {
-      nodes.watchFace.setAttribute("aria-pressed", next === "qlocktwo" ? "true" : "false");
+      nodes.watchFace.setAttribute("aria-pressed", isInteractive ? "true" : "false");
     }
-    if (nodes.qlocktwo) {
-      nodes.qlocktwo.setAttribute("aria-hidden", next === "qlocktwo" ? "false" : "true");
+    const faceNodes = {
+      flip: nodes.flipFace,
+      lcd: nodes.lcdFace,
+      pulse: nodes.pulseFace,
+      qlocktwo: nodes.qlocktwo,
+      "qlocktwo-ooe": nodes.qlocktwoOoe,
+      analog: document.getElementById("watch-face-analog"),
+    };
+    for (const [key, node] of Object.entries(faceNodes)) {
+      if (node) node.setAttribute("aria-hidden", key === next ? "false" : "true");
     }
-    const analogWrap = document.getElementById("watch-face-analog");
-    if (analogWrap) {
-      analogWrap.setAttribute("aria-hidden", next === "analog" ? "false" : "true");
-    }
+    // Each face owns its live update path; stop timers for faces that aren't
+    // currently visible so a background face doesn't keep the CPU warm.
     if (next === "qlocktwo") {
       updateQlocktwo(true);
       stopAnalogSecondTick();
+      stopPulseSecondTick();
+    } else if (next === "qlocktwo-ooe") {
+      updateQlocktwoOoe(true);
+      stopAnalogSecondTick();
+      stopPulseSecondTick();
     } else if (next === "analog") {
       updateAnalog(true);
       startAnalogSecondTick();
+      stopPulseSecondTick();
+    } else if (next === "flip") {
+      updateFlip(true);
+      stopAnalogSecondTick();
+      stopPulseSecondTick();
+    } else if (next === "lcd") {
+      updateLcd(true);
+      stopAnalogSecondTick();
+      stopPulseSecondTick();
+    } else if (next === "pulse") {
+      updatePulse(true);
+      stopAnalogSecondTick();
+      startPulseSecondTick();
     } else {
       stopAnalogSecondTick();
+      stopPulseSecondTick();
     }
     return next;
   }
 
   function cycleWatchFace() {
-    const current = document.body.getAttribute("data-watch-face") || "classic";
-    const idx = VALID_WATCH_FACES.indexOf(current);
+    const current = document.body.getAttribute("data-watch-face") || "flip";
+    let idx = VALID_WATCH_FACES.indexOf(current);
+    if (idx === -1) idx = 0;
     const next = VALID_WATCH_FACES[(idx + 1) % VALID_WATCH_FACES.length];
     try {
       if (window.localStorage) {
@@ -326,10 +635,28 @@
   }
 
   const nodes = {
-    time: document.getElementById("clock-time"),
     date: document.getElementById("clock-date"),
     watchFace: document.getElementById("watch-face"),
+    flipFace: document.getElementById("watch-face-flip"),
+    flipCards: {
+      h1: document.getElementById("flip-h1"),
+      h2: document.getElementById("flip-h2"),
+      m1: document.getElementById("flip-m1"),
+      m2: document.getElementById("flip-m2"),
+    },
+    lcdFace: document.getElementById("watch-face-lcd"),
+    lcdGroups: {
+      h1: document.getElementById("lcd-h1"),
+      h2: document.getElementById("lcd-h2"),
+      m1: document.getElementById("lcd-m1"),
+      m2: document.getElementById("lcd-m2"),
+    },
+    pulseFace: document.getElementById("watch-face-pulse"),
+    pulseHh: document.getElementById("pulse-hh"),
+    pulseMm: document.getElementById("pulse-mm"),
+    pulseSs: document.getElementById("pulse-ss"),
     qlocktwo: document.getElementById("watch-face-qlocktwo"),
+    qlocktwoOoe: document.getElementById("watch-face-qlocktwo-ooe"),
     analogHour: document.getElementById("analog-hand-hour"),
     analogMinute: document.getElementById("analog-hand-minute"),
     analogSecond: document.getElementById("analog-hand-second"),
@@ -475,10 +802,18 @@
   function updateClock() {
     const now = new Date();
     const timeValue = CLOCK_TIME_FMT.format(now);
-    nodes.time.textContent = timeValue;
-    nodes.date.textContent = CLOCK_DATE_FMT.format(now);
+    const dateParts = CLOCK_DATE_FMT.formatToParts(now);
+    const datePart = (type) => {
+      const part = dateParts.find((p) => p.type === type);
+      return part ? part.value : "";
+    };
+    nodes.date.textContent = `${datePart("weekday")} · ${datePart("day")}. ${datePart("month")}`;
     nodes.screensaverClock.textContent = timeValue;
+    updateFlip(false);
+    updateLcd(false);
+    updatePulse(false);
     updateQlocktwo(false);
+    updateQlocktwoOoe(false);
     updateAnalog(false);
   }
 
