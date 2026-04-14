@@ -46,9 +46,258 @@
   });
   let clockTimer = null;
 
+  // QLOCKTWO word-clock face. The Python module smart_display/watch_faces.py
+  // owns the canonical layout; this block is a 1:1 mirror so the minute tick
+  // doesn't need to round-trip to the server. Keep the two sides in sync.
+  const QLOCKTWO_WORDS = {
+    ES: [0, 0, 2],
+    IST: [0, 3, 3],
+    FUENF_MIN: [0, 7, 4],
+    ZEHN_MIN: [1, 0, 4],
+    ZWANZIG_MIN: [1, 4, 7],
+    VIERTEL: [2, 4, 7],
+    NACH: [3, 2, 4],
+    VOR: [3, 6, 3],
+    HALB: [4, 0, 4],
+    UHR: [9, 8, 3],
+  };
+  const QLOCKTWO_HOUR_WORDS = {
+    1: [5, 2, 3],
+    2: [5, 0, 4],
+    3: [6, 1, 4],
+    4: [7, 7, 4],
+    5: [6, 7, 4],
+    6: [9, 1, 5],
+    7: [5, 5, 6],
+    8: [8, 1, 4],
+    9: [7, 3, 4],
+    10: [8, 5, 4],
+    11: [7, 0, 3],
+    12: [4, 5, 5],
+  };
+  const VALID_WATCH_FACES = ["classic", "qlocktwo", "analog"];
+  const WATCH_FACE_LABELS = {
+    classic: "Klassisch",
+    qlocktwo: "Wortuhr",
+    analog: "Analog",
+  };
+  const WATCH_FACE_STORAGE_KEY = "sd.watch_face";
+  let qlocktwoLetterIndex = null;
+  let lastQlocktwoKey = "";
+
+  function qlocktwoHour12(hour24) {
+    const h = ((hour24 % 12) + 12) % 12;
+    return h === 0 ? 12 : h;
+  }
+
+  function qlocktwoActiveKeys(hour, minute) {
+    const block = Math.floor(minute / 5) * 5;
+    const thisHour = qlocktwoHour12(hour);
+    const nextHour = qlocktwoHour12(hour + 1);
+    const words = [QLOCKTWO_WORDS.ES, QLOCKTWO_WORDS.IST];
+    switch (block) {
+      case 0:
+        words.push(QLOCKTWO_HOUR_WORDS[thisHour], QLOCKTWO_WORDS.UHR);
+        break;
+      case 5:
+        words.push(QLOCKTWO_WORDS.FUENF_MIN, QLOCKTWO_WORDS.NACH, QLOCKTWO_HOUR_WORDS[thisHour]);
+        break;
+      case 10:
+        words.push(QLOCKTWO_WORDS.ZEHN_MIN, QLOCKTWO_WORDS.NACH, QLOCKTWO_HOUR_WORDS[thisHour]);
+        break;
+      case 15:
+        words.push(QLOCKTWO_WORDS.VIERTEL, QLOCKTWO_WORDS.NACH, QLOCKTWO_HOUR_WORDS[thisHour]);
+        break;
+      case 20:
+        words.push(QLOCKTWO_WORDS.ZWANZIG_MIN, QLOCKTWO_WORDS.NACH, QLOCKTWO_HOUR_WORDS[thisHour]);
+        break;
+      case 25:
+        words.push(
+          QLOCKTWO_WORDS.FUENF_MIN,
+          QLOCKTWO_WORDS.VOR,
+          QLOCKTWO_WORDS.HALB,
+          QLOCKTWO_HOUR_WORDS[nextHour],
+        );
+        break;
+      case 30:
+        words.push(QLOCKTWO_WORDS.HALB, QLOCKTWO_HOUR_WORDS[nextHour]);
+        break;
+      case 35:
+        words.push(
+          QLOCKTWO_WORDS.FUENF_MIN,
+          QLOCKTWO_WORDS.NACH,
+          QLOCKTWO_WORDS.HALB,
+          QLOCKTWO_HOUR_WORDS[nextHour],
+        );
+        break;
+      case 40:
+        words.push(QLOCKTWO_WORDS.ZWANZIG_MIN, QLOCKTWO_WORDS.VOR, QLOCKTWO_HOUR_WORDS[nextHour]);
+        break;
+      case 45:
+        words.push(QLOCKTWO_WORDS.VIERTEL, QLOCKTWO_WORDS.VOR, QLOCKTWO_HOUR_WORDS[nextHour]);
+        break;
+      case 50:
+        words.push(QLOCKTWO_WORDS.ZEHN_MIN, QLOCKTWO_WORDS.VOR, QLOCKTWO_HOUR_WORDS[nextHour]);
+        break;
+      case 55:
+        words.push(QLOCKTWO_WORDS.FUENF_MIN, QLOCKTWO_WORDS.VOR, QLOCKTWO_HOUR_WORDS[nextHour]);
+        break;
+      default:
+        break;
+    }
+    const keys = new Set();
+    for (const word of words) {
+      const [row, col, length] = word;
+      for (let i = 0; i < length; i += 1) {
+        keys.add(`${row},${col + i}`);
+      }
+    }
+    return keys;
+  }
+
+  function buildQlocktwoLetterIndex() {
+    if (!nodes.qlocktwo) {
+      return null;
+    }
+    const map = new Map();
+    const letters = nodes.qlocktwo.querySelectorAll(".qlocktwo-letter");
+    letters.forEach((letter) => {
+      const row = letter.dataset.row;
+      const col = letter.dataset.col;
+      if (row !== undefined && col !== undefined) {
+        map.set(`${row},${col}`, letter);
+      }
+    });
+    return map;
+  }
+
+  function updateQlocktwo(force) {
+    if (!nodes.qlocktwo) {
+      return;
+    }
+    const now = new Date();
+    // Resolve the timezone via the cached time formatter so the word clock
+    // follows the same zone as the classic clock.
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = now.getHours();
+    let minute = now.getMinutes();
+    for (const part of parts) {
+      if (part.type === "hour") {
+        hour = Number(part.value);
+      } else if (part.type === "minute") {
+        minute = Number(part.value);
+      }
+    }
+    const block = Math.floor(minute / 5) * 5;
+    const key = `${hour}:${block}`;
+    if (!force && key === lastQlocktwoKey) {
+      return;
+    }
+    lastQlocktwoKey = key;
+    if (!qlocktwoLetterIndex) {
+      qlocktwoLetterIndex = buildQlocktwoLetterIndex();
+    }
+    if (!qlocktwoLetterIndex) {
+      return;
+    }
+    const activeKeys = qlocktwoActiveKeys(hour, minute);
+    qlocktwoLetterIndex.forEach((letter, cellKey) => {
+      const active = activeKeys.has(cellKey);
+      if (active !== letter.classList.contains("is-active")) {
+        letter.classList.toggle("is-active", active);
+      }
+    });
+  }
+
+  let lastAnalogKey = "";
+
+  function updateAnalog(force) {
+    if (!nodes.analogHour || !nodes.analogMinute) {
+      return;
+    }
+    const now = new Date();
+    const parts = CLOCK_TIME_FMT.formatToParts(now);
+    let hour = now.getHours();
+    let minute = now.getMinutes();
+    for (const part of parts) {
+      if (part.type === "hour") {
+        hour = Number(part.value);
+      } else if (part.type === "minute") {
+        minute = Number(part.value);
+      }
+    }
+    const key = `${hour}:${minute}`;
+    if (!force && key === lastAnalogKey) {
+      return;
+    }
+    lastAnalogKey = key;
+    const hourDeg = (((hour % 12) * 30 + minute * 0.5) % 360).toFixed(2);
+    const minuteDeg = ((minute * 6) % 360).toFixed(2);
+    nodes.analogHour.setAttribute("transform", `rotate(${hourDeg} 100 100)`);
+    nodes.analogMinute.setAttribute("transform", `rotate(${minuteDeg} 100 100)`);
+  }
+
+  function currentWatchFace() {
+    const stored = (() => {
+      try {
+        return window.localStorage && window.localStorage.getItem(WATCH_FACE_STORAGE_KEY);
+      } catch (error) {
+        return null;
+      }
+    })();
+    if (stored && VALID_WATCH_FACES.includes(stored)) {
+      return stored;
+    }
+    const configured = config.watch_face;
+    if (configured && VALID_WATCH_FACES.includes(configured)) {
+      return configured;
+    }
+    return "classic";
+  }
+
+  function applyWatchFace(face) {
+    const next = VALID_WATCH_FACES.includes(face) ? face : "classic";
+    document.body.setAttribute("data-watch-face", next);
+    if (nodes.watchFace) {
+      nodes.watchFace.setAttribute("aria-pressed", next === "qlocktwo" ? "true" : "false");
+    }
+    if (nodes.qlocktwo) {
+      nodes.qlocktwo.setAttribute("aria-hidden", next === "qlocktwo" ? "false" : "true");
+    }
+    const analogWrap = document.getElementById("watch-face-analog");
+    if (analogWrap) {
+      analogWrap.setAttribute("aria-hidden", next === "analog" ? "false" : "true");
+    }
+    if (next === "qlocktwo") {
+      updateQlocktwo(true);
+    } else if (next === "analog") {
+      updateAnalog(true);
+    }
+    return next;
+  }
+
+  function cycleWatchFace() {
+    const current = document.body.getAttribute("data-watch-face") || "classic";
+    const idx = VALID_WATCH_FACES.indexOf(current);
+    const next = VALID_WATCH_FACES[(idx + 1) % VALID_WATCH_FACES.length];
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(WATCH_FACE_STORAGE_KEY, next);
+      }
+    } catch (error) {
+      /* storage disabled — fall back to session-only switch */
+    }
+    applyWatchFace(next);
+    showToast(`Uhrzeit-Stil: ${WATCH_FACE_LABELS[next] || next}`, "info", 1600);
+  }
+
   const nodes = {
     time: document.getElementById("clock-time"),
     date: document.getElementById("clock-date"),
+    watchFace: document.getElementById("watch-face"),
+    qlocktwo: document.getElementById("watch-face-qlocktwo"),
+    analogHour: document.getElementById("analog-hand-hour"),
+    analogMinute: document.getElementById("analog-hand-minute"),
     weatherLocation: document.getElementById("weather-location"),
     weatherStatus: document.getElementById("weather-status"),
     weatherTemperature: document.getElementById("weather-temperature"),
@@ -194,6 +443,8 @@
     nodes.time.textContent = timeValue;
     nodes.date.textContent = CLOCK_DATE_FMT.format(now);
     nodes.screensaverClock.textContent = timeValue;
+    updateQlocktwo(false);
+    updateAnalog(false);
   }
 
   function scheduleClockTick() {
@@ -815,6 +1066,18 @@
 
     nodes.screensaver.addEventListener("pointerdown", exitScreensaver, { passive: true });
 
+    if (nodes.watchFace) {
+      nodes.watchFace.addEventListener("click", (event) => {
+        // If the tap was consumed by the screensaver-exit path, the
+        // screensaver is still marked active briefly — skip cycling then.
+        if (screensaverActive) {
+          return;
+        }
+        event.preventDefault();
+        cycleWatchFace();
+      });
+    }
+
     if (nodes.toast) {
       nodes.toast.addEventListener("pointerdown", hideToast, { passive: true });
     }
@@ -882,6 +1145,7 @@
     });
   }
 
+  applyWatchFace(currentWatchFace());
   bindEvents();
   updateClock();
   render(state);

@@ -277,6 +277,7 @@ def make_app_config(
             data_dir=data_dir,
             log_level="INFO",
             demo_mode=False,
+            watch_face="classic",
         ),
         weather=WeatherConfig(
             enabled=weather_enabled,

@@ -4,9 +4,17 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from smart_display.i18n import format_initial_clock
 from smart_display.models import PhotoManifestEntry
 from smart_display.scheduler import DEFAULT_PAUSE_TTL_SECONDS
+from smart_display.watch_faces import (
+    QLOCKTWO_GRID,
+    analog_hand_angles,
+    qlocktwo_active_cells,
+)
 from smart_display.web.origin_guard import local_only
 
 
@@ -22,6 +30,9 @@ def create_blueprint() -> Blueprint:
         # first frame is correct. JS overwrites these values on its first tick.
         clock_factory = services.get("clock_factory", format_initial_clock)
         initial_clock = clock_factory(config.app.timezone)
+        now_local = datetime.now(ZoneInfo(config.app.timezone))
+        initial_qlocktwo = qlocktwo_active_cells(now_local.hour, now_local.minute)
+        initial_analog = analog_hand_angles(now_local.hour, now_local.minute)
         return render_template(
             "index.html",
             app_title="Smart Display",
@@ -33,9 +44,14 @@ def create_blueprint() -> Blueprint:
                 "poll_interval_seconds": max(
                     min(config.refresh_intervals.spotify_seconds, 30), 5
                 ),
+                "watch_face": config.app.watch_face,
             },
             initial_state=state,
             initial_clock=initial_clock,
+            qlocktwo_grid=QLOCKTWO_GRID,
+            qlocktwo_active=initial_qlocktwo,
+            initial_analog=initial_analog,
+            initial_watch_face=config.app.watch_face,
         )
 
     @blueprint.get("/api/state")
