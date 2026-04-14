@@ -6,7 +6,7 @@
     <title>{{ app_title }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   </head>
-  <body>
+  <body data-watch-face="{{ initial_watch_face }}">
     <script>
       window.__SMART_DISPLAY__ = {{ {"config": ui_config, "state": initial_state}|tojson }};
     </script>
@@ -14,7 +14,24 @@
     <main class="dashboard-shell" id="dashboard-shell">
       <section class="hero-panel">
         <div class="hero-panel__inner">
-          <div class="hero-time" id="clock-time">{{ initial_clock.time }}</div>
+          <button type="button" class="watch-face" id="watch-face" aria-label="Uhrzeit-Stil wechseln">
+            <div class="watch-face__classic" id="watch-face-classic">
+              <div class="hero-time" id="clock-time">{{ initial_clock.time }}</div>
+            </div>
+            <div class="watch-face__qlocktwo" id="watch-face-qlocktwo" aria-hidden="true">
+              {%- set active_keys = qlocktwo_active|map("join", ",")|list -%}
+              {%- for row in qlocktwo_grid -%}
+                {%- set row_idx = loop.index0 -%}
+                <div class="qlocktwo-row">
+                  {%- for letter in row -%}
+                    {%- set col_idx = loop.index0 -%}
+                    {%- set cell_key = row_idx|string ~ "," ~ col_idx|string -%}
+                    <span class="qlocktwo-letter{% if cell_key in active_keys %} is-active{% endif %}" data-row="{{ row_idx }}" data-col="{{ col_idx }}">{{ letter }}</span>
+                  {%- endfor -%}
+                </div>
+              {%- endfor -%}
+            </div>
+          </button>
           <div class="hero-date" id="clock-date">{{ initial_clock.date }}</div>
           <section class="hero-weather">
             <header class="hero-weather__header">

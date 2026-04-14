@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from smart_display.watch_faces import normalize_watch_face
+
 
 try:
     import yaml  # type: ignore
@@ -22,6 +24,7 @@ class AppSection:
     data_dir: Path
     log_level: str
     demo_mode: bool
+    watch_face: str
 
 
 @dataclass(slots=True)
@@ -162,6 +165,7 @@ def load_config_from_mapping(
             data_dir=data_dir,
             log_level=str(app_data.get("log_level", "INFO")).upper(),
             demo_mode=parse_bool(app_data.get("demo_mode", False)),
+            watch_face=normalize_watch_face(app_data.get("watch_face")),
         ),
         weather=WeatherConfig(
             enabled=parse_bool(mapping.get("weather", {}).get("enabled", True)),
@@ -295,6 +299,7 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
         "APP_DATA_DIR": ("app", "data_dir"),
         "APP_LOG_LEVEL": ("app", "log_level"),
         "APP_DEMO_MODE": ("app", "demo_mode"),
+        "APP_WATCH_FACE": ("app", "watch_face"),
         "WEATHER_ENABLED": ("weather", "enabled"),
         "WEATHER_PROVIDER": ("weather", "provider"),
         "WEATHER_LABEL": ("weather", "label"),

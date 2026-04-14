@@ -96,12 +96,83 @@ body {
   text-transform: uppercase;
 }
 
+.watch-face {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.watch-face:focus-visible {
+  outline: 2px solid rgba(216, 231, 255, 0.55);
+  outline-offset: 6px;
+  border-radius: 12px;
+}
+
+.watch-face__classic,
+.watch-face__qlocktwo {
+  display: none;
+}
+
+body[data-watch-face="classic"] .watch-face__classic {
+  display: block;
+}
+
+body[data-watch-face="qlocktwo"] .watch-face__qlocktwo {
+  display: grid;
+}
+
 .hero-time {
   font-size: clamp(106px, 15vw, 156px);
   font-weight: 700;
   line-height: 0.94;
   letter-spacing: -0.05em;
   margin-top: 4px;
+}
+
+.watch-face__qlocktwo {
+  grid-template-rows: repeat(10, 1fr);
+  gap: 2px;
+  margin-top: 4px;
+  padding: 2px 0;
+  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.16);
+  user-select: none;
+}
+
+.qlocktwo-row {
+  display: grid;
+  grid-template-columns: repeat(11, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.qlocktwo-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(22px, 3.6vw, 38px);
+  transition: color 280ms ease, text-shadow 280ms ease;
+}
+
+.qlocktwo-letter.is-active {
+  color: var(--accent-strong);
+  text-shadow: 0 0 14px rgba(216, 231, 255, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qlocktwo-letter {
+    transition: none;
+  }
 }
 
 .hero-date {
@@ -608,6 +679,20 @@ body {
 
   .hero-time {
     font-size: clamp(78px, 11.4vw, 110px);
+  }
+
+  .qlocktwo-letter {
+    font-size: clamp(18px, 2.8vw, 28px);
+    letter-spacing: 0.08em;
+  }
+
+  .watch-face__qlocktwo {
+    gap: 1px;
+    margin-top: 2px;
+  }
+
+  .qlocktwo-row {
+    gap: 1px;
   }
 
   .hero-date {
