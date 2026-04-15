@@ -2,6 +2,17 @@
 
 Leichtgewichtige Smart-Display-Anwendung für ein `1024x600` Touch-Panel im Kiosk-Betrieb. Die Basis ist bewusst knapp gehalten: ein einzelner Python-Prozess aggregiert Daten, cached Bildquellen und liefert eine kleine servergerenderte Web-UI aus. Der Browser auf dem Pi rendert nur lokale HTML-, CSS- und JavaScript-Dateien.
 
+## Watch Faces
+
+Sechs austauschbare Hero-Uhren, per Touch auf die Hero-Uhr durchschaltbar. Auswahl persistiert im Browser (`localStorage`).
+
+| | | |
+|---|---|---|
+| ![Flip](docs/screenshots/flip.png) **Flip** (Default) | ![LCD](docs/screenshots/lcd.png) **LCD** | ![Pulse](docs/screenshots/pulse.png) **Pulse** |
+| ![QLOCKTWO](docs/screenshots/qlocktwo.png) **QLOCKTWO** | ![QLOCKTWO OÖ](docs/screenshots/qlocktwo-ooe.png) **QLOCKTWO OÖ** | ![Analog](docs/screenshots/analog.png) **Analog** |
+
+Screenshots werden mit `bash scripts/take-screenshots.sh` neu generiert (Headless Chrome gegen den lokalen Demo-Server, 1024×600).
+
 ## Architektur
 
 - Backend: `Python 3.11`, `Flask`, `Waitress`
@@ -73,7 +84,7 @@ Die Defaults liegen in `config/default.yaml`. Secrets und gerätespezifische Wer
 Wichtige Schlüssel:
 
 - `APP_LOCALE`, `APP_TIMEZONE`
-- `APP_WATCH_FACE` — Start-Uhr-Stil (`classic`, `qlocktwo`, `analog`); per Touch auf die Hero-Uhr durchschaltbar, Auswahl persistiert im Browser
+- `APP_WATCH_FACE` — Start-Uhr-Stil (`flip` Default, `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe`, `analog`); per Touch auf die Hero-Uhr durchschaltbar, Auswahl persistiert im Browser
 - `WEATHER_LATITUDE`, `WEATHER_LONGITUDE`, `WEATHER_LABEL`
 - `CALENDAR_URL`, `CALENDAR_USERNAME`, `CALENDAR_PASSWORD`, `CALENDAR_NAME`
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, `SPOTIFY_DEVICE_ID`

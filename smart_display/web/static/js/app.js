@@ -487,6 +487,13 @@
     for (let i = 0; i < 4; i += 1) {
       flipDigitTo(cards[i], digits[i], !force);
     }
+    if (nodes.screensaverFlipCards) {
+      const s = nodes.screensaverFlipCards;
+      const sCards = [s.h1, s.h2, s.m1, s.m2];
+      for (let i = 0; i < 4; i += 1) {
+        flipDigitTo(sCards[i], digits[i], !force);
+      }
+    }
   }
 
   // --- LCD ---------------------------------------------------------------
@@ -527,10 +534,9 @@
   }
 
   // --- Pulse -------------------------------------------------------------
-  let pulseSecondTimer = null;
 
   function updatePulse(force) {
-    if (!nodes.pulseHh || !nodes.pulseMm || !nodes.pulseSs) return;
+    if (!nodes.pulseHh || !nodes.pulseMm) return;
     const now = new Date();
     const parts = CLOCK_TIME_FMT.formatToParts(now);
     let hour = String(now.getHours()).padStart(2, "0");
@@ -544,26 +550,6 @@
     }
     if (force || nodes.pulseMm.textContent !== minute) {
       nodes.pulseMm.textContent = minute;
-    }
-    const seconds = String(now.getSeconds()).padStart(2, "0");
-    if (nodes.pulseSs.textContent !== seconds) {
-      nodes.pulseSs.textContent = seconds;
-    }
-  }
-
-  function startPulseSecondTick() {
-    if (pulseSecondTimer !== null) return;
-    const msUntilNextSecond = 1000 - (Date.now() % 1000);
-    pulseSecondTimer = window.setTimeout(function tick() {
-      updatePulse(false);
-      pulseSecondTimer = window.setTimeout(tick, 1000);
-    }, msUntilNextSecond + 10);
-  }
-
-  function stopPulseSecondTick() {
-    if (pulseSecondTimer !== null) {
-      window.clearTimeout(pulseSecondTimer);
-      pulseSecondTimer = null;
     }
   }
 
@@ -590,30 +576,23 @@
     if (next === "qlocktwo") {
       updateQlocktwo(true);
       stopAnalogSecondTick();
-      stopPulseSecondTick();
     } else if (next === "qlocktwo-ooe") {
       updateQlocktwoOoe(true);
       stopAnalogSecondTick();
-      stopPulseSecondTick();
     } else if (next === "analog") {
       updateAnalog(true);
       startAnalogSecondTick();
-      stopPulseSecondTick();
     } else if (next === "flip") {
       updateFlip(true);
       stopAnalogSecondTick();
-      stopPulseSecondTick();
     } else if (next === "lcd") {
       updateLcd(true);
       stopAnalogSecondTick();
-      stopPulseSecondTick();
     } else if (next === "pulse") {
       updatePulse(true);
       stopAnalogSecondTick();
-      startPulseSecondTick();
     } else {
       stopAnalogSecondTick();
-      stopPulseSecondTick();
     }
     return next;
   }
@@ -654,7 +633,12 @@
     pulseFace: document.getElementById("watch-face-pulse"),
     pulseHh: document.getElementById("pulse-hh"),
     pulseMm: document.getElementById("pulse-mm"),
-    pulseSs: document.getElementById("pulse-ss"),
+    screensaverFlipCards: {
+      h1: document.getElementById("screensaver-flip-h1"),
+      h2: document.getElementById("screensaver-flip-h2"),
+      m1: document.getElementById("screensaver-flip-m1"),
+      m2: document.getElementById("screensaver-flip-m2"),
+    },
     qlocktwo: document.getElementById("watch-face-qlocktwo"),
     qlocktwoOoe: document.getElementById("watch-face-qlocktwo-ooe"),
     analogHour: document.getElementById("analog-hand-hour"),
@@ -690,7 +674,6 @@
     screensaverImageA: document.getElementById("screensaver-image-a"),
     screensaverImageB: document.getElementById("screensaver-image-b"),
     screensaverFallback: document.getElementById("screensaver-fallback"),
-    screensaverClock: document.getElementById("screensaver-clock"),
     toast: document.getElementById("toast"),
   };
   let volumeCommitTimer = null;
@@ -801,14 +784,12 @@
 
   function updateClock() {
     const now = new Date();
-    const timeValue = CLOCK_TIME_FMT.format(now);
     const dateParts = CLOCK_DATE_FMT.formatToParts(now);
     const datePart = (type) => {
       const part = dateParts.find((p) => p.type === type);
       return part ? part.value : "";
     };
     nodes.date.textContent = `${datePart("weekday")} · ${datePart("day")}. ${datePart("month")}`;
-    nodes.screensaverClock.textContent = timeValue;
     updateFlip(false);
     updateLcd(false);
     updatePulse(false);

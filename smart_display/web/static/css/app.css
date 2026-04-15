@@ -354,19 +354,6 @@ body[data-watch-face="analog"] .watch-face__analog {
   50% { opacity: 0.25; }
 }
 
-.pulse-clock__ss {
-  font-size: clamp(28px, 3.6vw, 40px);
-  font-weight: 600;
-  color: rgba(216, 231, 255, 0.5);
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-  margin-left: 2px;
-}
-
-.pulse-clock__ss-sep {
-  margin-right: 2px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .pulse-clock__colon { animation: none; }
 }
@@ -1008,10 +995,6 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
     font-size: clamp(78px, 11.4vw, 110px);
   }
 
-  .pulse-clock__ss {
-    font-size: clamp(22px, 3vw, 30px);
-  }
-
   .flip-digit {
     width: clamp(54px, 7.2vw, 72px);
     height: clamp(82px, 11vw, 112px);
@@ -1346,10 +1329,28 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
 }
 
 .screensaver__clock {
-  font-size: clamp(84px, 16vw, 160px);
-  line-height: 0.94;
-  font-weight: 700;
-  letter-spacing: -0.05em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flip-clock--screensaver {
+  width: min(90vw, 640px);
+  gap: 10px;
+}
+
+.flip-clock--screensaver .flip-digit {
+  width: clamp(92px, 14vw, 140px);
+  height: clamp(140px, 22vw, 212px);
+}
+
+.flip-clock--screensaver .flip-digit__digit {
+  font-size: clamp(118px, 18vw, 178px);
+  height: clamp(140px, 22vw, 212px);
+}
+
+.flip-clock--screensaver .flip-clock__sep {
+  gap: clamp(16px, 2vw, 24px);
 }
 
 .screensaver__caption {

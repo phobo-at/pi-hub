@@ -61,7 +61,6 @@
                 <span class="pulse-clock__hm">
                   <span id="pulse-hh">{{ initial_clock.time[:2] }}</span><span class="pulse-clock__colon">:</span><span id="pulse-mm">{{ initial_clock.time[3:] }}</span>
                 </span>
-                <span class="pulse-clock__ss" aria-hidden="true"><span class="pulse-clock__ss-sep">:</span><span id="pulse-ss">{{ initial_clock.seconds }}</span></span>
               </div>
             </div>
             <div class="watch-face__analog" id="watch-face-analog" aria-hidden="true">
@@ -187,7 +186,21 @@
       <img class="screensaver__image screensaver__image--b" id="screensaver-image-b" alt="">
       <div class="screensaver__overlay"></div>
       <div class="screensaver__fallback" id="screensaver-fallback">
-        <div class="screensaver__clock" id="screensaver-clock">{{ initial_clock.time }}</div>
+        <div class="screensaver__clock" id="screensaver-clock">
+          <div class="flip-clock flip-clock--screensaver">
+            {%- for position, idx in [("h1", 0), ("h2", 1), ("m1", 2), ("m2", 3)] -%}
+              <div class="flip-digit" id="screensaver-flip-{{ position }}" data-value="{{ time_digits[idx] }}">
+                <div class="flip-digit__half flip-digit__half--top"><span class="flip-digit__digit">{{ time_digits[idx] }}</span></div>
+                <div class="flip-digit__half flip-digit__half--bottom"><span class="flip-digit__digit">{{ time_digits[idx] }}</span></div>
+                <div class="flip-digit__flap flip-digit__flap--top" aria-hidden="true"><span class="flip-digit__digit"></span></div>
+                <div class="flip-digit__flap flip-digit__flap--bottom" aria-hidden="true"><span class="flip-digit__digit"></span></div>
+              </div>
+              {%- if position == "h2" -%}
+                <div class="flip-clock__sep" aria-hidden="true"><span></span><span></span></div>
+              {%- endif -%}
+            {%- endfor -%}
+          </div>
+        </div>
         <div class="screensaver__caption">Berühren zum Aufwecken</div>
       </div>
     </aside>
