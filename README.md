@@ -1,45 +1,47 @@
-# Smart Display für Raspberry Pi Zero 2 W
+# Smart Display for Raspberry Pi Zero 2 W
 
-Leichtgewichtige Smart-Display-Anwendung für ein `1024x600` Touch-Panel im Kiosk-Betrieb. Die Basis ist bewusst knapp gehalten: ein einzelner Python-Prozess aggregiert Daten, cached Bildquellen und liefert eine kleine servergerenderte Web-UI aus. Der Browser auf dem Pi rendert nur lokale HTML-, CSS- und JavaScript-Dateien.
+Lightweight smart-display app for a `1024x600` touch panel in kiosk mode. The stack is deliberately minimal: a single Python process aggregates data, caches image sources, and serves a small server-rendered web UI. The browser on the Pi only renders local HTML, CSS, and JavaScript — no build step on the device.
 
 ## Watch Faces
 
-Sechs austauschbare Hero-Uhren, per Touch auf die Hero-Uhr durchschaltbar. Auswahl persistiert im Browser (`localStorage`).
+Six swappable hero clocks. Tap the hero clock to cycle through them; the choice persists in the browser (`localStorage`).
 
 | | | |
 |---|---|---|
-| ![Flip](docs/screenshots/flip.png) **Flip** (Default) | ![LCD](docs/screenshots/lcd.png) **LCD** | ![Pulse](docs/screenshots/pulse.png) **Pulse** |
+| ![Flip](docs/screenshots/flip.png) **Flip** (default) | ![LCD](docs/screenshots/lcd.png) **LCD** | ![Pulse](docs/screenshots/pulse.png) **Pulse** |
 | ![QLOCKTWO](docs/screenshots/qlocktwo.png) **QLOCKTWO** | ![QLOCKTWO OÖ](docs/screenshots/qlocktwo-ooe.png) **QLOCKTWO OÖ** | ![Analog](docs/screenshots/analog.png) **Analog** |
 
-Screenshots werden mit `bash scripts/take-screenshots.sh` neu generiert (Headless Chrome gegen den lokalen Demo-Server, 1024×600).
+Regenerate the screenshots with `bash scripts/take-screenshots.sh` (headless Chrome against the local demo server, 1024×600).
 
-## Architektur
+> The UI ships in German — this is a personal device. For reference: `Termine` = Calendar, `Wetter Zuhause` = Home Weather, `Spotify Wiedergabe` = Spotify Playback, `Berühren zum Aufwecken` = Touch to wake. The QLOCKTWO OÖ face is the Upper Austrian dialect variant of the classic word clock.
+
+## Architecture
 
 - Backend: `Python 3.11`, `Flask`, `Waitress`
-- UI: servergerenderte Shell mit `HTML`, `CSS`, `Vanilla JS`
-- Datenfluss: Hintergrundjobs laden Wetter, CalDAV, Spotify und Lightroom periodisch; die UI pollt nur `GET /api/state`
-- Persistenz: `data/last_good.json` für den letzten gültigen Dashboard-Zustand, `data/screensaver/manifest.json` plus vorkonvertierte Bilder für den Screensaver
-- Betriebsmodell: `smart-display.service` startet das Backend, `smart-display-kiosk.service` startet Chromium im Vollbild
+- UI: server-rendered shell with `HTML`, `CSS`, vanilla `JS`
+- Data flow: background jobs periodically fetch weather, CalDAV, Spotify, and Lightroom; the UI only polls `GET /api/state`
+- Persistence: `data/last_good.json` holds the last valid dashboard state; `data/screensaver/manifest.json` plus pre-converted images back the screensaver
+- Runtime model: `smart-display.service` runs the backend, `smart-display-kiosk.service` runs Chromium in fullscreen
 
-## Warum dieser Stack
+## Why this stack
 
-- Kein schweres SPA-Framework: deutlich weniger RAM, weniger Re-Render, kein JS-Build zur Laufzeit auf dem Pi
-- Python passt gut zu CalDAV, Bildaufbereitung und pragmatischem HTML-Scraping für Lightroom
-- Eine lokale Web-UI bleibt leicht deploybar und trennt Datenbeschaffung sauber von Darstellung
-- `last known good` und lokaler Bild-Cache sorgen dafür, dass Ausfälle einzelner Dienste die Oberfläche nicht zerlegen
+- No heavy SPA framework: less RAM, fewer re-renders, no JS build on the Pi
+- Python fits CalDAV, image processing, and pragmatic HTML scraping for Lightroom well
+- A local web UI stays easy to deploy and cleanly separates data fetching from rendering
+- `last known good` plus the local image cache keep the surface stable when individual services fail
 
-## Projektstruktur
+## Project structure
 
 ```text
-config/                  JSON-kompatible YAML-Defaults
-deploy/systemd/          systemd-Units für Backend und Kiosk
-deploy/x11/              Kiosk-Startskript für Chromium
-smart_display/           App, Provider, Cache, Scheduler, Web-UI
-tests/                   kleine Unit-Tests für Kernlogik
-data/                    Laufzeitdaten und lokaler Screensaver-Cache
+config/                  JSON-compatible YAML defaults
+deploy/systemd/          systemd units for backend and kiosk
+deploy/x11/              kiosk startup script for Chromium
+smart_display/           app, providers, cache, scheduler, web UI
+tests/                   small unit tests for core logic
+data/                    runtime data and local screensaver cache
 ```
 
-## Lokaler Start
+## Running locally
 
 ```bash
 python3 -m venv .venv
@@ -49,17 +51,17 @@ cp .env.example .env
 python -m smart_display.app
 ```
 
-Optional für eine lokale Demo ohne echte Accounts:
+Optional: local demo mode without real accounts:
 
 ```bash
 APP_DEMO_MODE=true python -m smart_display.app
 ```
 
-Die Anwendung lauscht standardmäßig auf `http://127.0.0.1:8080`.
+The app listens on `http://127.0.0.1:8080` by default.
 
-## Lokaler Testserver
+## Local test server
 
-Für Desktop-Tests gibt es jetzt einen getrennten lokalen Demo-Server. Er nutzt `config/local-demo.yaml`, ein eigenes Datenverzeichnis unter `data/local-demo`, Demo-Bilder für den Screensaver und Mock-Daten für Wetter, Termine und Spotify.
+For desktop testing there is a separate local demo server. It uses `config/local-demo.yaml`, its own data directory under `data/local-demo`, bundled demo images for the screensaver, and mock data for weather, calendar, and Spotify.
 
 Start:
 
@@ -67,69 +69,69 @@ Start:
 python -m smart_display.local_server
 ```
 
-oder nach `pip install -e .`:
+or, after `pip install -e .`:
 
 ```bash
 smart-display-local
 ```
 
-Der lokale Testserver lauscht standardmäßig auf `http://127.0.0.1:8090`.
+The local test server listens on `http://127.0.0.1:8090` by default.
 
-Optional kannst du `.env.local` aus `.env.local.example` ableiten. Diese Datei wird nach `.env` geladen und überschreibt sie, damit lokale Tests nicht in dieselben Datenpfade oder Provider-Konfigurationen laufen müssen.
+You can optionally derive `.env.local` from `.env.local.example`. This file is loaded after `.env` and overrides it, so local tests don't have to share data paths or provider config with the production run.
 
-## Konfiguration
+## Configuration
 
-Die Defaults liegen in `config/default.yaml`. Secrets und gerätespezifische Werte kommen in `.env`.
+Defaults live in `config/default.yaml`. Secrets and device-specific values go into `.env`.
 
-Wichtige Schlüssel:
+Key settings:
 
 - `APP_LOCALE`, `APP_TIMEZONE`
-- `APP_WATCH_FACE` — Start-Uhr-Stil (`flip` Default, `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe`, `analog`); per Touch auf die Hero-Uhr durchschaltbar, Auswahl persistiert im Browser
+- `APP_WATCH_FACE` — initial clock style (`flip` default, `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe`, `analog`); tap-to-cycle on the hero clock, selection persists in the browser
 - `WEATHER_LATITUDE`, `WEATHER_LONGITUDE`, `WEATHER_LABEL`
 - `CALENDAR_URL`, `CALENDAR_USERNAME`, `CALENDAR_PASSWORD`, `CALENDAR_NAME`
 - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, `SPOTIFY_DEVICE_ID`
 - `SCREENSAVER_SOURCE_URL`, `SCREENSAVER_IDLE_TIMEOUT_SECONDS`, `SCREENSAVER_REFRESH_INTERVAL_SECONDS`
 
-## Betrieb auf dem Pi
+## Deploying to the Pi
 
-Einfachster Weg auf frischem Raspberry Pi OS Bookworm Lite: Repo clonen und `scripts/install-pi.sh` ausführen. Das Script installiert X11-/Kiosk-Pakete, legt venv an, setzt `Xwrapper.config`, deployt nach `/opt/smart-display` und aktiviert beide systemd-Units.
+Simplest path on a fresh Raspberry Pi OS Bookworm Lite: clone the repo and run `scripts/install-pi.sh`. The script installs the X11/kiosk packages, creates the venv, writes `Xwrapper.config`, deploys to `/opt/smart-display`, and enables both systemd units.
 
 ```bash
 sudo bash scripts/install-pi.sh
 ```
 
-Danach `.env` unter `/opt/smart-display/.env` mit Credentials füllen und rebooten.
+Then populate `/opt/smart-display/.env` with credentials and reboot.
 
-Manuelle Schritte (falls nicht über das Script):
+Manual steps (if you're not using the script):
 
-1. Raspberry Pi OS Bookworm Lite installieren
-2. Minimales X11-/Kiosk-Setup installieren:
+1. Install Raspberry Pi OS Bookworm Lite
+2. Install a minimal X11/kiosk stack:
 
 ```bash
 sudo apt install --no-install-recommends xserver-xorg x11-xserver-utils xinit openbox chromium-browser fonts-noto-core
 ```
 
-3. Projekt nach `/opt/smart-display` deployen, venv anlegen und `pip install -e .`
-4. `.env` auf dem Pi ablegen
-5. systemd-Units aus `deploy/systemd/smart-display.service` und `deploy/systemd/smart-display-kiosk.service` anpassen und aktivieren
-6. `deploy/x11/kiosk-session.sh` ausführbar machen
+3. Deploy the project to `/opt/smart-display`, create a venv, `pip install -e .`
+4. Place `.env` on the Pi
+5. Adjust and enable the systemd units from `deploy/systemd/smart-display.service` and `deploy/systemd/smart-display-kiosk.service`
+6. Make `deploy/x11/kiosk-session.sh` executable
 
-## Kiosk-Strategie
+## Kiosk strategy
 
-- Chromium startet mit `--kiosk --app=http://127.0.0.1:8080`
-- Touch-Ereignisse setzen den Idle-Timer zurück
-- Nach Inaktivität aktiviert sich ein Vollbild-Screensaver
-- Die Bildquelle wird ausschließlich aus lokal gecachten Bildern oder Demo-Assets gelesen
+- Chromium launches with `--kiosk --app=http://127.0.0.1:8080`
+- Touch events reset the idle timer
+- After inactivity a fullscreen screensaver kicks in
+- Images only come from the local cache or bundled demo assets
 
-## Failure Modes
+## Failure modes
 
-- Wetter, CalDAV und Spotify setzen bei Fehlern nur ihre jeweilige Kachel auf `Cache` oder `Fehler`
-- Screensaver bleibt bei Lightroom-Problemen auf bestehendem lokalen Cache oder Demo-Bildern
-- Ohne verfügbare Fotos zeigt der Screensaver einen ruhigen Uhr-Fallback statt einer leeren Fläche
+- Weather, CalDAV, and Spotify only downgrade their own tile to `Cache` or `Error` on failure
+- The screensaver keeps using its existing local cache or demo images when Lightroom hiccups
+- With no photos available the screensaver falls back to a calm flip-clock face instead of blank space
 
-## Bekannte Grenzen
+## Known limits
 
-- Spotify benötigt Premium und ein erreichbares Connect-Ziel
-- CalDAV-Parsing basiert auf `caldav` und `icalendar`; unterschiedliche Server können leichte Anpassungen nötig machen
-- Lightroom-Sharing ist absichtlich pragmatisch implementiert und hängt von öffentlichen Bild-URLs im HTML ab
-- Die Demo-Bilder sind Platzhalter für den Erststart und kein Ersatz für einen echten Foto-Feed
+- Spotify requires Premium and a reachable Connect target
+- CalDAV parsing sits on `caldav` and `icalendar`; some servers may need small tweaks
+- Lightroom sharing is intentionally pragmatic and depends on public image URLs in the shared HTML
+- The bundled demo images are first-run placeholders, not a substitute for a real photo feed
