@@ -12,7 +12,7 @@ from flask import Flask
 from smart_display.app import serve_app
 from smart_display.config import load_config
 from smart_display.local_server import _load_local_env
-from smart_display.web.routes import create_blueprint
+from smart_display.web.routes import _poll_interval_seconds, create_blueprint
 from tests._support import make_app_config, make_state_store
 
 
@@ -70,6 +70,43 @@ class LocalServerTest(unittest.TestCase):
 
             self.assertEqual(env["APP_PORT"], "8091")
             self.assertEqual(env["APP_HOST"], "127.0.0.1")
+
+    def test_poll_interval_slows_down_without_spotify(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_app_config(Path(temp_dir), spotify_enabled=False)
+            config = replace(
+                config,
+                refresh_intervals=replace(
+                    config.refresh_intervals,
+                    spotify_seconds=10,
+                ),
+            )
+
+            self.assertEqual(_poll_interval_seconds(config), 30)
+
+    def test_poll_interval_decoupled_from_backend_when_spotify_enabled(self) -> None:
+        # The browser polls the in-process /api/state, which is free, so the
+        # frontend cadence is decoupled from the upstream Spotify refresh:
+        # capped low for snappy updates, floored against busy-spin.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = make_app_config(Path(temp_dir), spotify_enabled=True)
+
+            real = replace(
+                config,
+                refresh_intervals=replace(config.refresh_intervals, spotify_seconds=5),
+            )
+            slow = replace(
+                config,
+                refresh_intervals=replace(config.refresh_intervals, spotify_seconds=45),
+            )
+            fast = replace(
+                config,
+                refresh_intervals=replace(config.refresh_intervals, spotify_seconds=2),
+            )
+
+            self.assertEqual(_poll_interval_seconds(real), 4)  # Pi default (backend 5s)
+            self.assertEqual(_poll_interval_seconds(slow), 4)  # ceiling
+            self.assertEqual(_poll_interval_seconds(fast), 3)  # floor
 
 
 class _StubScheduler:

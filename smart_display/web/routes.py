@@ -21,6 +21,23 @@ from smart_display.watch_faces import (
 from smart_display.web.origin_guard import local_only
 
 
+# Das lokale /api/state ist in-process und ohne Upstream-Call praktisch gratis,
+# daher entkoppeln wir den Browser-Poll von der Spotify-Backend-Frequenz: ein
+# schneller lokaler Poll zeigt Backend-Updates binnen weniger Sekunden, ohne
+# zusätzliche Spotify-API-Last. Gedeckelt niedrig, gefloort gegen Busy-Spin.
+FRONTEND_POLL_CEILING_SECONDS = 4
+FRONTEND_POLL_FLOOR_SECONDS = 3
+
+
+def _poll_interval_seconds(config) -> int:
+    if not config.spotify.enabled:
+        return 30
+    return max(
+        min(config.refresh_intervals.spotify_seconds, FRONTEND_POLL_CEILING_SECONDS),
+        FRONTEND_POLL_FLOOR_SECONDS,
+    )
+
+
 def create_blueprint() -> Blueprint:
     blueprint = Blueprint("web", __name__)
 
@@ -59,9 +76,7 @@ def create_blueprint() -> Blueprint:
                 "timezone": config.app.timezone,
                 "idle_timeout_seconds": config.screensaver.idle_timeout_seconds,
                 "image_duration_seconds": config.screensaver.image_duration_seconds,
-                "poll_interval_seconds": max(
-                    min(config.refresh_intervals.spotify_seconds, 30), 5
-                ),
+                "poll_interval_seconds": _poll_interval_seconds(config),
                 "watch_face": config.app.watch_face,
             },
             initial_state=state,

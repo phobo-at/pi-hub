@@ -90,7 +90,7 @@ Key settings:
 - `APP_WATCH_FACE` — initial clock style (`flip` default, `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe`, `analog`); tap-to-cycle on the hero clock, selection persists in the browser
 - `WEATHER_LATITUDE`, `WEATHER_LONGITUDE`, `WEATHER_LABEL`
 - `CALENDAR_URL`, `CALENDAR_USERNAME`, `CALENDAR_PASSWORD`, `CALENDAR_NAME`
-- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, `SPOTIFY_DEVICE_ID`
+- `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN`, `SPOTIFY_DEVICE_ID` — mint a refresh token with `python3 scripts/spotify-auth.py --client-id <id> --client-secret <secret>` (one-off OAuth helper; run it on a machine with a browser, add `http://127.0.0.1:8888/callback` as a redirect URI in the Spotify app first). Note: reliable volume control via the Web API only works on real Spotify Connect speakers — phones report `supports_volume: false` and the desktop app is unreliable.
 - `SCREENSAVER_SOURCE_URL`, `SCREENSAVER_IDLE_TIMEOUT_SECONDS`, `SCREENSAVER_REFRESH_INTERVAL_SECONDS`
 
 ## Deploying to the Pi
