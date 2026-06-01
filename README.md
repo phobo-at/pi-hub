@@ -94,22 +94,30 @@ Key settings:
 
 ## Deploying to the Pi
 
-Simplest path on a fresh Raspberry Pi OS Bookworm Lite: clone the repo and run `scripts/install-pi.sh`. The script installs the X11/kiosk packages, creates the venv, writes `Xwrapper.config`, deploys to `/opt/smart-display`, and enables both systemd units.
+Simplest path on a fresh Raspberry Pi OS Lite install: clone the repo and run `scripts/install-pi.sh`. The script installs the X11/kiosk packages, creates the venv, writes `Xwrapper.config`, deploys to `/opt/smart-display`, and enables both systemd units. By default it uses the user that invoked `sudo`; set `SMART_DISPLAY_USER=...` if the service should run as a different user.
 
 ```bash
 sudo bash scripts/install-pi.sh
+```
+
+If you run the script from a root shell or want to force a specific service user:
+
+```bash
+sudo env SMART_DISPLAY_USER=<username> bash scripts/install-pi.sh
 ```
 
 Then populate `/opt/smart-display/.env` with credentials and reboot.
 
 Manual steps (if you're not using the script):
 
-1. Install Raspberry Pi OS Bookworm Lite
+1. Install Raspberry Pi OS Lite
 2. Install a minimal X11/kiosk stack:
 
 ```bash
 sudo apt install --no-install-recommends xserver-xorg x11-xserver-utils xinit openbox chromium-browser fonts-noto-core
 ```
+
+On current Raspberry Pi OS releases the Chromium package may be named `chromium`; the install script detects this automatically. For a manual install, use whichever of `chromium-browser` or `chromium` exists on your image.
 
 3. Deploy the project to `/opt/smart-display`, create a venv, `pip install -e .`
 4. Place `.env` on the Pi

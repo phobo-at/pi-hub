@@ -10,6 +10,5 @@
   <circle cx="230" cy="180" r="150" fill="#bfd8ef" opacity="0.12"/>
   <circle cx="810" cy="460" r="200" fill="#f0d4b2" opacity="0.12"/>
   <text x="80" y="470" fill="#f5f7fa" font-family="Noto Sans, sans-serif" font-size="72" font-weight="700">Wohnzimmer</text>
-  <text x="82" y="525" fill="#c8d3df" font-family="Noto Sans, sans-serif" font-size="26">Demo-Bild fuer den lokalen Screensaver-Cache</text>
+  <text x="82" y="525" fill="#c8d3df" font-family="Noto Sans, sans-serif" font-size="26">Demo-Bild für den lokalen Screensaver-Cache</text>
 </svg>
-

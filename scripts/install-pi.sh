@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# install-pi.sh — Deploys smart-display onto a fresh Raspberry Pi OS Bookworm Lite.
+# install-pi.sh — Deploys smart-display onto a fresh Raspberry Pi OS Lite.
 #
 # Voraussetzungen:
-#   - SD-Karte geflasht mit RPi OS Bookworm Lite (64-bit empfohlen)
-#   - SSH, WLAN und User "pi" im Imager konfiguriert
+#   - SD-Karte geflasht mit Raspberry Pi OS Lite (64-bit empfohlen)
+#   - SSH, WLAN und ein Admin-User im Imager konfiguriert
 #   - Dieses Repo ist bereits auf den Pi kopiert (git clone oder scp)
 #
 # Aufruf:
 #   sudo bash scripts/install-pi.sh
+# Optional, falls ein anderer Service-User verwendet werden soll:
+#   sudo env SMART_DISPLAY_USER=pi bash scripts/install-pi.sh
 #
 set -euo pipefail
 
 INSTALL_DIR="/opt/smart-display"
-SERVICE_USER="pi"
-SERVICE_GROUP="pi"
+SERVICE_USER="${SMART_DISPLAY_USER:-${SUDO_USER:-pi}}"
+if [[ "$SERVICE_USER" == "root" && -z "${SMART_DISPLAY_USER:-}" ]]; then
+    SERVICE_USER="pi"
+fi
 
 # --- Preflight ---------------------------------------------------------------
 
@@ -24,9 +28,10 @@ fi
 
 if ! id "$SERVICE_USER" &>/dev/null; then
     echo "Fehler: User '$SERVICE_USER' existiert nicht."
-    echo "Erstelle ihn im Raspberry Pi Imager oder mit: sudo adduser $SERVICE_USER" >&2
+    echo "Erstelle ihn im Raspberry Pi Imager oder setze SMART_DISPLAY_USER auf den richtigen User." >&2
     exit 1
 fi
+SERVICE_GROUP="${SMART_DISPLAY_GROUP:-$(id -gn "$SERVICE_USER")}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 if [[ ! -f "$SCRIPT_DIR/pyproject.toml" ]]; then
@@ -44,19 +49,25 @@ echo ""
 
 echo "=== 1/7  System-Pakete installieren ==="
 apt-get update -qq
+CHROMIUM_PACKAGE="chromium-browser"
+if ! apt-cache show "$CHROMIUM_PACKAGE" >/dev/null 2>&1; then
+    CHROMIUM_PACKAGE="chromium"
+fi
 apt-get install -y --no-install-recommends \
     python3-venv \
     python3-dev \
     git \
+    rsync \
     xserver-xorg \
     x11-xserver-utils \
     xinit \
     openbox \
-    chromium-browser \
+    "$CHROMIUM_PACKAGE" \
     fonts-noto-core \
     libopenjp2-7 \
     libtiff6 \
     libjpeg62-turbo
+echo "  Chromium-Paket: $CHROMIUM_PACKAGE"
 echo "  OK"
 
 # --- 2. Projekt deployen -----------------------------------------------------
@@ -124,11 +135,19 @@ echo "  OK"
 # --- 7. Systemd ---------------------------------------------------------------
 
 echo "=== 7/7  Systemd-Services ==="
-cp "$INSTALL_DIR/deploy/systemd/smart-display.service" /etc/systemd/system/
-cp "$INSTALL_DIR/deploy/systemd/smart-display-kiosk.service" /etc/systemd/system/
+sed \
+    -e "s/^User=.*/User=$SERVICE_USER/" \
+    -e "s/^Group=.*/Group=$SERVICE_GROUP/" \
+    "$INSTALL_DIR/deploy/systemd/smart-display.service" \
+    > /etc/systemd/system/smart-display.service
+sed \
+    -e "s/^User=.*/User=$SERVICE_USER/" \
+    -e "s/^Group=.*/Group=$SERVICE_GROUP/" \
+    "$INSTALL_DIR/deploy/systemd/smart-display-kiosk.service" \
+    > /etc/systemd/system/smart-display-kiosk.service
 systemctl daemon-reload
 systemctl enable smart-display.service smart-display-kiosk.service
-echo "  Services aktiviert (starten beim nächsten Boot)"
+echo "  Services aktiviert für $SERVICE_USER:$SERVICE_GROUP (starten beim nächsten Boot)"
 
 # --- Fertig -------------------------------------------------------------------
 
