@@ -18,6 +18,19 @@ SERVICE_USER="${SMART_DISPLAY_USER:-${SUDO_USER:-pi}}"
 if [[ "$SERVICE_USER" == "root" && -z "${SMART_DISPLAY_USER:-}" ]]; then
     SERVICE_USER="pi"
 fi
+REQUESTED_KIOSK_BROWSER="${SMART_DISPLAY_KIOSK_BROWSER:-}"
+INSTALL_COG="${SMART_DISPLAY_INSTALL_COG:-false}"
+case "$REQUESTED_KIOSK_BROWSER" in
+    "" | chromium | chromium-browser | cog)
+        ;;
+    *)
+        echo "Fehler: SMART_DISPLAY_KIOSK_BROWSER muss chromium, chromium-browser oder cog sein." >&2
+        exit 1
+        ;;
+esac
+if [[ "$REQUESTED_KIOSK_BROWSER" == "cog" ]]; then
+    INSTALL_COG="true"
+fi
 
 # --- Preflight ---------------------------------------------------------------
 
@@ -49,25 +62,52 @@ echo ""
 
 echo "=== 1/7  System-Pakete installieren ==="
 apt-get update -qq
+is_installable_package() {
+    local candidate
+    candidate="$(apt-cache policy "$1" | awk '/Candidate:/ {print $2; exit}')"
+    [[ -n "$candidate" && "$candidate" != "(none)" ]]
+}
+
 CHROMIUM_PACKAGE="chromium-browser"
-if ! apt-cache show "$CHROMIUM_PACKAGE" >/dev/null 2>&1; then
+if ! is_installable_package "$CHROMIUM_PACKAGE"; then
     CHROMIUM_PACKAGE="chromium"
 fi
+if ! is_installable_package "$CHROMIUM_PACKAGE"; then
+    echo "Fehler: weder chromium-browser noch chromium ist installierbar." >&2
+    exit 1
+fi
+
+OPTIONAL_KIOSK_PACKAGES=()
+if [[ "$INSTALL_COG" == "true" ]]; then
+    for package in cog wpewebkit-driver libgles2; do
+        if ! is_installable_package "$package"; then
+            echo "Fehler: KIOSK_BROWSER=cog angefordert, aber Paket '$package' ist nicht installierbar." >&2
+            exit 1
+        fi
+    done
+    OPTIONAL_KIOSK_PACKAGES+=(cog wpewebkit-driver libgles2)
+fi
+
 apt-get install -y --no-install-recommends \
     python3-venv \
     python3-dev \
     git \
     rsync \
     xserver-xorg \
+    xserver-xorg-legacy \
     x11-xserver-utils \
     xinit \
     openbox \
     "$CHROMIUM_PACKAGE" \
+    "${OPTIONAL_KIOSK_PACKAGES[@]}" \
     fonts-noto-core \
     libopenjp2-7 \
     libtiff6 \
     libjpeg62-turbo
 echo "  Chromium-Paket: $CHROMIUM_PACKAGE"
+if [[ ${#OPTIONAL_KIOSK_PACKAGES[@]} -gt 0 ]]; then
+    echo "  Optionale Kiosk-Pakete: ${OPTIONAL_KIOSK_PACKAGES[*]}"
+fi
 echo "  OK"
 
 # --- 2. Projekt deployen -----------------------------------------------------
@@ -80,6 +120,7 @@ if [[ "$(realpath "$SCRIPT_DIR")" != "$(realpath "$INSTALL_DIR")" ]]; then
         --exclude 'data' \
         --exclude '.env' \
         --exclude '.env.local' \
+        --exclude '.kiosk.env' \
         --exclude '__pycache__' \
         "$SCRIPT_DIR/" "$INSTALL_DIR/"
     echo "  Kopiert von $SCRIPT_DIR"
@@ -108,6 +149,18 @@ else
     echo "  .env existiert bereits — wird nicht überschrieben."
 fi
 
+if [[ ! -f "$INSTALL_DIR/.kiosk.env" ]]; then
+    cp "$INSTALL_DIR/deploy/x11/kiosk.env.example" "$INSTALL_DIR/.kiosk.env"
+    if [[ -n "$REQUESTED_KIOSK_BROWSER" ]]; then
+        sed -i "s/^KIOSK_BROWSER=.*/KIOSK_BROWSER=$REQUESTED_KIOSK_BROWSER/" "$INSTALL_DIR/.kiosk.env"
+    fi
+    chown "$SERVICE_USER":"$SERVICE_GROUP" "$INSTALL_DIR/.kiosk.env"
+    chmod 600 "$INSTALL_DIR/.kiosk.env"
+    echo "  .kiosk.env angelegt (aus kiosk.env.example)"
+else
+    echo "  .kiosk.env existiert bereits — wird nicht überschrieben."
+fi
+
 # --- 5. Datenverzeichnis -----------------------------------------------------
 
 echo "=== 5/7  Datenverzeichnis ==="
@@ -120,13 +173,19 @@ echo "  $DATA_DIR bereit"
 
 echo "=== 6/7  Kiosk vorbereiten ==="
 chmod +x "$INSTALL_DIR/deploy/x11/kiosk-session.sh"
+chmod +x "$INSTALL_DIR/deploy/kiosk/start-kiosk.sh"
 
 # xinit braucht diese Einstellung damit ein non-root User X starten darf
 XWRAPPER="/etc/X11/Xwrapper.config"
-if [[ ! -f "$XWRAPPER" ]] || ! grep -q "allowed_users=anybody" "$XWRAPPER"; then
+if [[ ! -f "$XWRAPPER" ]] \
+    || ! grep -q "allowed_users=anybody" "$XWRAPPER" \
+    || ! grep -q "needs_root_rights=yes" "$XWRAPPER"; then
     mkdir -p /etc/X11
-    echo "allowed_users=anybody" > "$XWRAPPER"
-    echo "  Xwrapper.config: allowed_users=anybody gesetzt"
+    {
+        echo "allowed_users=anybody"
+        echo "needs_root_rights=yes"
+    } > "$XWRAPPER"
+    echo "  Xwrapper.config: allowed_users=anybody, needs_root_rights=yes gesetzt"
 fi
 
 # Console-Autologin deaktivieren falls aktiv — systemd managed den Kiosk

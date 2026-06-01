@@ -21,7 +21,7 @@ Regenerate the screenshots with `bash scripts/take-screenshots.sh` (headless Chr
 - UI: server-rendered shell with `HTML`, `CSS`, vanilla `JS`
 - Data flow: background jobs periodically fetch weather, CalDAV, Spotify, and Lightroom; the UI only polls `GET /api/state`
 - Persistence: `data/last_good.json` holds the last valid dashboard state; `data/screensaver/manifest.json` plus pre-converted images back the screensaver
-- Runtime model: `smart-display.service` runs the backend, `smart-display-kiosk.service` runs Chromium in fullscreen
+- Runtime model: `smart-display.service` runs the backend, `smart-display-kiosk.service` runs a local kiosk browser in fullscreen
 
 ## Why this stack
 
@@ -35,7 +35,8 @@ Regenerate the screenshots with `bash scripts/take-screenshots.sh` (headless Chr
 ```text
 config/                  JSON-compatible YAML defaults
 deploy/systemd/          systemd units for backend and kiosk
-deploy/x11/              kiosk startup script for Chromium
+deploy/kiosk/            browser launcher shared by Chromium and Cog
+deploy/x11/              X11 session script for Chromium fallback
 smart_display/           app, providers, cache, scheduler, web UI
 tests/                   small unit tests for core logic
 data/                    runtime data and local screensaver cache
@@ -106,7 +107,17 @@ If you run the script from a root shell or want to force a specific service user
 sudo env SMART_DISPLAY_USER=<username> bash scripts/install-pi.sh
 ```
 
-Then populate `/opt/smart-display/.env` with credentials and reboot.
+For the Pi Zero 2 W, the lighter Cog/WPE kiosk path is recommended:
+
+```bash
+sudo env SMART_DISPLAY_KIOSK_BROWSER=cog bash scripts/install-pi.sh
+```
+
+Then populate `/opt/smart-display/.env` with credentials and reboot. Kiosk-only
+browser settings live in `/opt/smart-display/.kiosk.env`; keep provider
+credentials out of that file because the browser process inherits it. The
+launcher waits for `/health` before starting the browser so a slow boot does
+not leave a transient error page on the panel.
 
 Manual steps (if you're not using the script):
 
@@ -114,19 +125,23 @@ Manual steps (if you're not using the script):
 2. Install a minimal X11/kiosk stack:
 
 ```bash
-sudo apt install --no-install-recommends xserver-xorg x11-xserver-utils xinit openbox chromium-browser fonts-noto-core
+sudo apt install --no-install-recommends xserver-xorg xserver-xorg-legacy x11-xserver-utils xinit openbox chromium fonts-noto-core
 ```
 
 On current Raspberry Pi OS releases the Chromium package may be named `chromium`; the install script detects this automatically. For a manual install, use whichever of `chromium-browser` or `chromium` exists on your image.
 
 3. Deploy the project to `/opt/smart-display`, create a venv, `pip install -e .`
-4. Place `.env` on the Pi
+4. Place `.env` and `.kiosk.env` on the Pi
 5. Adjust and enable the systemd units from `deploy/systemd/smart-display.service` and `deploy/systemd/smart-display-kiosk.service`
-6. Make `deploy/x11/kiosk-session.sh` executable
+6. Make `deploy/kiosk/start-kiosk.sh` and `deploy/x11/kiosk-session.sh` executable
 
 ## Kiosk strategy
 
 - Chromium launches with `--kiosk --app=http://127.0.0.1:8080`
+- `/opt/smart-display/.kiosk.env` can switch `KIOSK_BROWSER=chromium` to `KIOSK_BROWSER=cog`
+- Chromium uses Xorg/Openbox; `cog` uses WPE WebKit directly on DRM and does not start X11
+- Install and select the WPE WebKit path with `sudo env SMART_DISPLAY_KIOSK_BROWSER=cog bash scripts/install-pi.sh`
+- `KIOSK_HEALTH_URL` and `KIOSK_WAIT_TIMEOUT_SECONDS` control the boot-time backend wait
 - Touch events reset the idle timer
 - After inactivity a fullscreen screensaver kicks in
 - Images only come from the local cache or bundled demo assets

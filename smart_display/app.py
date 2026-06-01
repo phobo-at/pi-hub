@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+from collections.abc import Callable
 
 from flask import Flask
 
@@ -15,6 +16,9 @@ from smart_display.providers.weather_openmeteo import OpenMeteoProvider
 from smart_display.scheduler import ScheduledJob, Scheduler
 from smart_display.state_store import StateStore
 from smart_display.web.routes import create_blueprint
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -54,53 +58,148 @@ def create_app(
 
     if start_scheduler:
         scheduler = Scheduler()
-        # Plan B2: stagger the boot fan-out so the Pi Zero doesn't hammer four
-        # upstream APIs in the first second after `systemctl start`. Jitter
-        # ±1 s on every subsequent interval spreads refreshes over long uptimes.
-        scheduler.start(
-            [
-                ScheduledJob(
-                    name="weather",
-                    interval_seconds=app_config.refresh_intervals.weather_seconds,
-                    task=weather_provider.refresh,
-                    startup_delay_seconds=0.0,
-                    jitter_seconds=1.0,
-                ),
-                ScheduledJob(
-                    name="calendar",
-                    interval_seconds=app_config.refresh_intervals.calendar_seconds,
-                    task=calendar_provider.refresh,
-                    startup_delay_seconds=2.0,
-                    jitter_seconds=1.0,
-                ),
-                ScheduledJob(
-                    name="spotify",
-                    interval_seconds=app_config.refresh_intervals.spotify_seconds,
-                    task=spotify_provider.refresh,
-                    startup_delay_seconds=4.0,
-                    jitter_seconds=1.0,
-                    pause_group="spotify",
-                ),
-                ScheduledJob(
-                    name="screensaver",
-                    interval_seconds=app_config.refresh_intervals.lightroom_seconds,
-                    task=screensaver_provider.refresh,
-                    startup_delay_seconds=6.0,
-                    jitter_seconds=1.0,
-                ),
-                ScheduledJob(
-                    name="mock",
-                    interval_seconds=60,
-                    task=mock_provider.refresh,
-                    startup_delay_seconds=1.0,
-                    jitter_seconds=1.0,
-                ),
-            ]
+        jobs = _build_scheduled_jobs(
+            app_config,
+            weather_refresh=weather_provider.refresh,
+            calendar_refresh=calendar_provider.refresh,
+            spotify_refresh=spotify_provider.refresh,
+            screensaver_refresh=screensaver_provider.refresh,
+            mock_refresh=mock_provider.refresh,
         )
+        _seed_unscheduled_provider_state(
+            jobs,
+            weather_refresh=weather_provider.refresh,
+            calendar_refresh=calendar_provider.refresh,
+            spotify_refresh=spotify_provider.refresh,
+            screensaver_refresh=screensaver_provider.refresh,
+        )
+        scheduler.start(jobs)
         app.extensions["smart_display"]["scheduler"] = scheduler
         atexit.register(scheduler.stop)
 
     return app
+
+
+def _build_scheduled_jobs(
+    config: AppConfig,
+    *,
+    weather_refresh: Callable[[], None],
+    calendar_refresh: Callable[[], None],
+    spotify_refresh: Callable[[], None],
+    screensaver_refresh: Callable[[], None],
+    mock_refresh: Callable[[], None],
+) -> list[ScheduledJob]:
+    """Return only jobs that have useful periodic work on the Pi.
+
+    Disabled or incomplete providers still get seeded once at boot by
+    ``_seed_unscheduled_provider_state`` so the UI shows a deliberate empty
+    state, but they do not keep a sleeping thread alive forever.
+    """
+    jobs: list[ScheduledJob] = []
+
+    # Plan B2: stagger the boot fan-out so the Pi Zero doesn't hammer all
+    # upstream APIs in the first second after `systemctl start`. Jitter ±1 s
+    # on every subsequent interval spreads refreshes over long uptimes.
+    if config.weather.enabled:
+        jobs.append(
+            ScheduledJob(
+                name="weather",
+                interval_seconds=config.refresh_intervals.weather_seconds,
+                task=weather_refresh,
+                startup_delay_seconds=0.0,
+                jitter_seconds=1.0,
+            )
+        )
+
+    if _calendar_has_credentials(config):
+        jobs.append(
+            ScheduledJob(
+                name="calendar",
+                interval_seconds=config.refresh_intervals.calendar_seconds,
+                task=calendar_refresh,
+                startup_delay_seconds=2.0,
+                jitter_seconds=1.0,
+            )
+        )
+
+    if _spotify_has_credentials(config):
+        jobs.append(
+            ScheduledJob(
+                name="spotify",
+                interval_seconds=config.refresh_intervals.spotify_seconds,
+                task=spotify_refresh,
+                startup_delay_seconds=4.0,
+                jitter_seconds=1.0,
+                pause_group="spotify",
+            )
+        )
+
+    if config.screensaver.enabled and bool(config.screensaver.source_url):
+        jobs.append(
+            ScheduledJob(
+                name="screensaver",
+                interval_seconds=config.refresh_intervals.lightroom_seconds,
+                task=screensaver_refresh,
+                startup_delay_seconds=6.0,
+                jitter_seconds=1.0,
+            )
+        )
+
+    if config.app.demo_mode:
+        jobs.append(
+            ScheduledJob(
+                name="mock",
+                interval_seconds=60,
+                task=mock_refresh,
+                startup_delay_seconds=1.0,
+                jitter_seconds=1.0,
+            )
+        )
+
+    return jobs
+
+
+def _calendar_has_credentials(config: AppConfig) -> bool:
+    return config.calendar.enabled and all(
+        [
+            config.calendar.url,
+            config.calendar.username,
+            config.calendar.password,
+        ]
+    )
+
+
+def _spotify_has_credentials(config: AppConfig) -> bool:
+    return config.spotify.enabled and all(
+        [
+            config.spotify.client_id,
+            config.spotify.client_secret,
+            config.spotify.refresh_token,
+        ]
+    )
+
+
+def _seed_unscheduled_provider_state(
+    jobs: list[ScheduledJob],
+    *,
+    weather_refresh: Callable[[], None],
+    calendar_refresh: Callable[[], None],
+    spotify_refresh: Callable[[], None],
+    screensaver_refresh: Callable[[], None],
+) -> None:
+    scheduled = {job.name for job in jobs}
+    for name, refresh in (
+        ("weather", weather_refresh),
+        ("calendar", calendar_refresh),
+        ("spotify", spotify_refresh),
+        ("screensaver", screensaver_refresh),
+    ):
+        if name in scheduled:
+            continue
+        try:
+            refresh()
+        except Exception:  # pragma: no cover
+            logger.exception("startup provider seed failed: %s", name)
 
 
 def main() -> None:

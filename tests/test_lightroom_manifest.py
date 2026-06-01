@@ -4,6 +4,7 @@ import base64
 import io
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from smart_display.cache.image_cache import (
@@ -12,7 +13,11 @@ from smart_display.cache.image_cache import (
     _compute_next_retry,
     ImageCache,
 )
-from smart_display.providers.lightroom_source import extract_image_urls
+from smart_display.providers.lightroom_source import (
+    LightroomSourceProvider,
+    extract_image_urls,
+)
+from tests._support import FakeHttpClient, make_app_config, make_state_store
 
 
 SAMPLE_PNG = base64.b64decode(
@@ -58,6 +63,20 @@ class LightroomManifestTest(unittest.TestCase):
             ],
         )
 
+    def test_extract_image_urls_accepts_lightroom_renditions(self) -> None:
+        html = """
+        <meta property="og:image"
+          content="https://photos.adobe.io/v2/spaces/s/assets/a/revisions/r/renditions/x?api_key=LightroomMobileWeb1">
+        """
+        urls = extract_image_urls(html, "https://lightroom.adobe.com/shares/abc")
+
+        self.assertEqual(
+            urls,
+            [
+                "https://photos.adobe.io/v2/spaces/s/assets/a/revisions/r/renditions/x?api_key=LightroomMobileWeb1",
+            ],
+        )
+
     def test_sync_remote_images_reuses_existing_manifest_entries(self) -> None:
         calls: list[str] = []
 
@@ -80,6 +99,90 @@ class LightroomManifestTest(unittest.TestCase):
 
             self.assertEqual(calls, urls)
             self.assertEqual(cache.count(), 2)
+
+    def test_provider_follows_shared_album_redirect(self) -> None:
+        calls: list[str] = []
+
+        def fake_downloader(url: str, timeout_seconds: int):
+            calls.append(url)
+            return SAMPLE_PNG, {}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            base = make_app_config(tmp)
+            config = replace(
+                base,
+                screensaver=replace(
+                    base.screensaver,
+                    source_url="https://adobe.ly/short",
+                    images_per_tick=1,
+                ),
+            )
+            store = make_state_store(tmp)
+            cache = ImageCache(
+                cache_dir=tmp / "screensaver",
+                manifest_path=tmp / "screensaver" / "manifest.json",
+                downloader=fake_downloader,
+            )
+            http = FakeHttpClient()
+            http.add_response(
+                "GET",
+                "https://adobe.ly/short",
+                status=301,
+                headers={"location": "https://lightroom.adobe.com/shares/album"},
+            )
+            http.add_response(
+                "GET",
+                "https://lightroom.adobe.com/shares/album",
+                body="""
+                <script>
+                  window.SharesConfig = {
+                    spaceAttributes: {"base":"https://photos.adobe.io/v2/"},
+                    albumAttributes: {
+                      "base":"https://photos.adobe.io/v2/spaces/space/",
+                      "links":{
+                        "/rels/space_album_images_videos":{
+                          "href":"albums/album/assets?embed=asset\\u0026subtype=image%3Bvideo"
+                        }
+                      }
+                    }
+                  };
+                </script>
+                """,
+            )
+            http.add_response(
+                "GET",
+                "https://photos.adobe.io/v2/spaces/space/albums/album/assets?embed=asset&subtype=image%3Bvideo",
+                body="""
+                while (1) {}
+                {
+                  "base": "https://photos.adobe.io/v2/spaces/space/",
+                  "resources": [
+                    {
+                      "asset": {
+                        "links": {
+                          "/rels/rendition_type/1280": {
+                            "href": "assets/asset/revisions/rev/renditions/render"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+                """,
+            )
+
+            provider = LightroomSourceProvider(config, store, cache, http_client=http)
+            provider.refresh()
+
+            health = store.health_payload()["providers"]["screensaver"]
+            self.assertEqual(health["status"], "ok")
+            self.assertEqual(
+                calls,
+                [
+                    "https://photos.adobe.io/v2/spaces/space/assets/asset/revisions/rev/renditions/render?api_key=LightroomMobileWeb1",
+                ],
+            )
 
 
 class PerTickDownloadLimitTest(unittest.TestCase):

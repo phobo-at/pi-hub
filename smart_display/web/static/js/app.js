@@ -8,6 +8,7 @@
   let slideshowTimer = null;
   let resizeTimer = null;
   let midnightTimer = null;
+  let lastRenderedStateKey = "";
   // Plan B1 watchdog: while the screensaver is visible we re-POST
   // /api/screensaver/state periodically so the backend pause-TTL stays
   // fresh. If this loop stops firing (tab crash, JS exception), the TTL
@@ -472,8 +473,7 @@
     flipCleanupTimers.set(card, timer);
   }
 
-  function updateFlip(force) {
-    if (!nodes.flipCards) return;
+  function currentClockDigits() {
     const now = new Date();
     const parts = CLOCK_TIME_FMT.formatToParts(now);
     let hour = String(now.getHours()).padStart(2, "0");
@@ -482,18 +482,25 @@
       if (part.type === "hour") hour = part.value.padStart(2, "0");
       else if (part.type === "minute") minute = part.value.padStart(2, "0");
     }
-    const digits = [hour[0], hour[1], minute[0], minute[1]];
-    const cards = [nodes.flipCards.h1, nodes.flipCards.h2, nodes.flipCards.m1, nodes.flipCards.m2];
+    return [hour[0], hour[1], minute[0], minute[1]];
+  }
+
+  function updateFlipCards(cardSet, digits, force) {
+    if (!cardSet) return;
+    const cards = [cardSet.h1, cardSet.h2, cardSet.m1, cardSet.m2];
     for (let i = 0; i < 4; i += 1) {
       flipDigitTo(cards[i], digits[i], !force);
     }
-    if (nodes.screensaverFlipCards) {
-      const s = nodes.screensaverFlipCards;
-      const sCards = [s.h1, s.h2, s.m1, s.m2];
-      for (let i = 0; i < 4; i += 1) {
-        flipDigitTo(sCards[i], digits[i], !force);
-      }
-    }
+  }
+
+  function updateFlip(force) {
+    const digits = currentClockDigits();
+    updateFlipCards(nodes.flipCards, digits, force);
+    updateFlipCards(nodes.screensaverFlipCards, digits, force);
+  }
+
+  function updateScreensaverFlip(force) {
+    updateFlipCards(nodes.screensaverFlipCards, currentClockDigits(), force);
   }
 
   // --- LCD ---------------------------------------------------------------
@@ -782,6 +789,23 @@
     node.innerHTML = icons[iconName] || "";
   }
 
+  function updateActiveWatchFace(force) {
+    const face = document.body.getAttribute("data-watch-face") || "flip";
+    if (face === "flip") {
+      updateFlip(force);
+    } else if (face === "lcd") {
+      updateLcd(force);
+    } else if (face === "pulse") {
+      updatePulse(force);
+    } else if (face === "qlocktwo") {
+      updateQlocktwo(force);
+    } else if (face === "qlocktwo-ooe") {
+      updateQlocktwoOoe(force);
+    } else if (face === "analog") {
+      updateAnalog(force);
+    }
+  }
+
   function updateClock() {
     const now = new Date();
     const dateParts = CLOCK_DATE_FMT.formatToParts(now);
@@ -790,12 +814,12 @@
       return part ? part.value : "";
     };
     nodes.date.textContent = `${datePart("weekday")} · ${datePart("day")}. ${datePart("month")}`;
-    updateFlip(false);
-    updateLcd(false);
-    updatePulse(false);
-    updateQlocktwo(false);
-    updateQlocktwoOoe(false);
-    updateAnalog(false);
+    if ((document.body.getAttribute("data-watch-face") || "flip") === "flip") {
+      updateFlip(false);
+    } else {
+      updateScreensaverFlip(false);
+      updateActiveWatchFace(false);
+    }
   }
 
   function scheduleClockTick() {
@@ -1180,8 +1204,25 @@
     nodes.spotifyVolumeReadout.textContent = `${incoming}%`;
   }
 
-  function render(nextState) {
-    state = nextState || state;
+  function stateRenderKey(nextState) {
+    try {
+      return JSON.stringify(nextState || {});
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function render(nextState, options = {}) {
+    const next = nextState || state;
+    const key = stateRenderKey(next);
+    if (!options.force && key && key === lastRenderedStateKey) {
+      state = next;
+      return;
+    }
+    state = next;
+    if (key) {
+      lastRenderedStateKey = key;
+    }
     renderWeather(state.weather || {});
     renderSpotify(state.spotify || {});
     renderCalendar(state.calendar || {});
@@ -1194,7 +1235,7 @@
     nextMidnight.setHours(24, 0, 2, 0); // 2s slack so we land safely past the boundary
     const delayMs = Math.max(nextMidnight.getTime() - now.getTime(), 1000);
     midnightTimer = window.setTimeout(() => {
-      render(state);
+      render(state, { force: true });
       scheduleMidnightRerender();
     }, delayMs);
   }
@@ -1260,6 +1301,7 @@
       return;
     }
     state = { ...state, spotify: spotifyState };
+    lastRenderedStateKey = "";
     renderSpotify(spotifyState);
   }
 
@@ -1492,19 +1534,19 @@
     });
     window.addEventListener("resize", () => {
       window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => render(state), 80);
+      resizeTimer = window.setTimeout(() => render(state, { force: true }), 80);
     });
   }
 
   applyWatchFace(currentWatchFace());
   bindEvents();
   updateClock();
-  render(state);
+  render(state, { force: true });
   schedulePolling();
   scheduleMidnightRerender();
   resetIdleTimer();
   scheduleClockTick();
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => render(state));
+    document.fonts.ready.then(() => render(state, { force: true }));
   }
 })();

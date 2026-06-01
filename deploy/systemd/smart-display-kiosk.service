@@ -7,10 +7,13 @@ Requires=smart-display.service
 Type=simple
 User=pi
 Group=pi
-ExecStart=/usr/bin/xinit /opt/smart-display/deploy/x11/kiosk-session.sh -- :0 vt1 -nolisten tcp
+RuntimeDirectory=smart-display-kiosk
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/smart-display-kiosk
+ExecStartPre=+/usr/bin/install -d -m 1777 -o root -g root /tmp/.X11-unix
+ExecStart=/opt/smart-display/deploy/kiosk/start-kiosk.sh
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-
