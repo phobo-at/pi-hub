@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import json
 import threading
+import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -11,6 +13,91 @@ from smart_display.http_client import HttpClient, HttpError, HttpResponse
 from smart_display.models import ProviderSnapshot, SpotifyState
 from smart_display.providers.base import BaseProvider
 from smart_display.state_store import StateStore
+
+# Sentinel so ``_api_request`` can tell "caller passed no device_id, fall back
+# to the configured default" apart from "caller explicitly wants no device_id
+# in the query" (transfer step carries the device in the body instead).
+_UNSET: Any = object()
+
+# Device/playlist lists are fetched on-demand when the picker overlay opens, not
+# on the poll loop. A short TTL dedupes rapid open/close taps without hiding a
+# speaker the user just woke up; playlists change rarely, so they cache longer.
+_DEVICES_CACHE_TTL_SECONDS = 15
+_PLAYLISTS_CACHE_TTL_SECONDS = 600
+
+# Canned data so the picker overlay can be exercised at 1024x600 on the demo
+# server (APP_DEMO_MODE / local-demo.yaml) without a real Spotify account.
+_DEMO_DEVICES: list[dict[str, Any]] = [
+    {"id": "demo-living", "name": "Wohnzimmer", "type": "Speaker", "is_active": True, "is_restricted": False, "volume_percent": 42},
+    {"id": "demo-kitchen", "name": "Küche", "type": "Speaker", "is_active": False, "is_restricted": False, "volume_percent": 30},
+    {"id": "demo-office", "name": "Arbeitszimmer", "type": "Speaker", "is_active": False, "is_restricted": False, "volume_percent": 18},
+]
+_DEMO_PLAYLISTS: list[dict[str, Any]] = [
+    {"uri": "spotify:playlist:demo1", "name": "Sonntagskaffee", "image_url": None, "track_count": 48},
+    {"uri": "spotify:playlist:demo2", "name": "Fokus", "image_url": None, "track_count": 120},
+    {"uri": "spotify:playlist:demo3", "name": "Abendessen", "image_url": None, "track_count": 64},
+    {"uri": "spotify:playlist:demo4", "name": "Laufrunde", "image_url": None, "track_count": 33},
+    {"uri": "spotify:playlist:demo5", "name": "Kinderlieder", "image_url": None, "track_count": 25},
+    {"uri": "spotify:playlist:demo6", "name": "Jazz Klassiker", "image_url": None, "track_count": 90},
+]
+
+
+def _smallest_image_url(images: Any) -> str | None:
+    """Pick the lightest cover URL — saves bandwidth/decode on the Pi.
+
+    Spotify image arrays are usually largest-first; playlist mosaics often carry
+    null widths, so fall back to the last (typically smallest) entry.
+    """
+    if not isinstance(images, list):
+        return None
+    usable = [im for im in images if isinstance(im, dict) and im.get("url")]
+    if not usable:
+        return None
+    sized = [im for im in usable if isinstance(im.get("width"), int)]
+    if sized:
+        return str(min(sized, key=lambda im: im["width"]).get("url"))
+    return str(usable[-1].get("url"))
+
+
+def map_spotify_devices(raw: Any) -> list[dict[str, Any]]:
+    """Flatten ``/me/player/devices`` into the small shape the picker consumes."""
+    devices: list[dict[str, Any]] = []
+    for device in raw or []:
+        if not isinstance(device, dict):
+            continue
+        devices.append(
+            {
+                "id": device.get("id"),
+                "name": str(device.get("name") or "Unbenanntes Gerät"),
+                "type": str(device.get("type") or ""),
+                "is_active": bool(device.get("is_active", False)),
+                "is_restricted": bool(device.get("is_restricted", False)),
+                "volume_percent": device.get("volume_percent"),
+            }
+        )
+    devices.sort(key=lambda item: item["name"].lower())
+    return devices
+
+
+def map_spotify_playlists(raw: Any) -> list[dict[str, Any]]:
+    """Flatten ``/me/playlists`` items into ``{uri, name, image_url, track_count}``."""
+    playlists: list[dict[str, Any]] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        uri = item.get("uri")
+        if not uri:
+            continue
+        tracks = item.get("tracks") or {}
+        playlists.append(
+            {
+                "uri": str(uri),
+                "name": str(item.get("name") or "Playlist"),
+                "image_url": _smallest_image_url(item.get("images")),
+                "track_count": tracks.get("total") if isinstance(tracks, dict) else None,
+            }
+        )
+    return playlists
 
 
 def build_spotify_state_from_payload(
@@ -92,6 +179,8 @@ class SpotifyProvider(BaseProvider):
         self._token_lock = threading.Lock()
         self._access_token: str | None = None
         self._token_expiry = datetime.now(timezone.utc)
+        self._list_cache_lock = threading.Lock()
+        self._list_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
     # ---- scheduler entrypoint --------------------------------------------
 
@@ -189,7 +278,116 @@ class SpotifyProvider(BaseProvider):
             f"/me/player/volume?{urllib.parse.urlencode({'volume_percent': value})}",
         )
 
-    def _send_command(self, method: str, path: str) -> dict[str, Any]:
+    def start_playback(
+        self, device_id: str, context_uri: str | None = None
+    ) -> dict[str, Any]:
+        """Start (or transfer) playback on a chosen Spotify Connect device.
+
+        Two-step, mirroring spotipi: transfer first to wake/select the target
+        device, then issue ``play``. The transfer is best-effort — a sleeping
+        speaker can reject it, but the subsequent ``play?device_id=`` still
+        activates it. Without a ``context_uri`` this simply moves the current
+        session to ``device_id`` (the "Hierher übertragen" affordance).
+        """
+        if self.config.app.demo_mode and not self.config.spotify.enabled:
+            return {
+                "ok": True,
+                "message": "Demo: Wiedergabe würde starten.",
+                "state": self.state_store.get_state().spotify.to_dict(),
+            }
+        if not self._is_configured():
+            return {
+                "ok": False,
+                "message": "Spotify ist nicht konfiguriert.",
+                "state": None,
+            }
+        device_id = (device_id or "").strip()
+        if not device_id:
+            return {"ok": False, "message": "Kein Gerät ausgewählt.", "state": None}
+
+        # Step 1 — transfer/wake. Device lives in the body here, so suppress the
+        # query device_id. Failures are logged but never abort the play call.
+        try:
+            self._api_request(
+                "PUT",
+                "/me/player",
+                body={"device_ids": [device_id], "play": False},
+                device_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001 — transfer is best-effort
+            self.logger.info("spotify transfer step failed (continuing): %s", exc)
+
+        body: dict[str, Any] | None = None
+        context_uri = (context_uri or "").strip()
+        if context_uri:
+            if context_uri.startswith("spotify:track:"):
+                body = {"uris": [context_uri]}
+            else:
+                body = {"context_uri": context_uri}
+
+        try:
+            response = self._api_request(
+                "PUT", "/me/player/play", body=body, device_id=device_id
+            )
+        except HttpError:
+            return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
+        except Exception:  # noqa: BLE001 — token refresh errors bubble here
+            return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
+
+        # The device list is now stale (active device changed) — drop it so the
+        # next picker open reflects reality.
+        self._invalidate_list_cache("devices")
+        return self._handle_command_response(response)
+
+    def list_devices(self) -> dict[str, Any]:
+        """Available Connect devices for the picker. On-demand, lightly cached."""
+        if self.config.app.demo_mode and not self.config.spotify.enabled:
+            return {"ok": True, "message": "ok", "devices": list(_DEMO_DEVICES)}
+        if not self._is_configured():
+            return {
+                "ok": False,
+                "message": "Spotify ist nicht konfiguriert.",
+                "devices": [],
+            }
+        cached = self._list_cache_get("devices", _DEVICES_CACHE_TTL_SECONDS)
+        if cached is not None:
+            return {"ok": True, "message": "ok", "devices": cached}
+        payload, error = self._list_get("/me/player/devices")
+        if error is not None:
+            return {"ok": False, "message": error, "devices": []}
+        devices = map_spotify_devices(payload.get("devices"))
+        self._list_cache_set("devices", devices)
+        return {"ok": True, "message": "ok", "devices": devices}
+
+    def list_playlists(self) -> dict[str, Any]:
+        """User's own playlists for the picker. On-demand, cached for minutes."""
+        if self.config.app.demo_mode and not self.config.spotify.enabled:
+            return {"ok": True, "message": "ok", "playlists": list(_DEMO_PLAYLISTS)}
+        if not self._is_configured():
+            return {
+                "ok": False,
+                "message": "Spotify ist nicht konfiguriert.",
+                "playlists": [],
+            }
+        cached = self._list_cache_get("playlists", _PLAYLISTS_CACHE_TTL_SECONDS)
+        if cached is not None:
+            return {"ok": True, "message": "ok", "playlists": cached}
+        limit = max(1, min(int(self.config.spotify.playlists_limit), 50))
+        payload, error = self._list_get(f"/me/playlists?limit={limit}")
+        if error is not None:
+            return {"ok": False, "message": error, "playlists": []}
+        playlists = map_spotify_playlists(payload.get("items"))
+        self._list_cache_set("playlists", playlists)
+        return {"ok": True, "message": "ok", "playlists": playlists}
+
+    def _send_command(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, Any] | None = None,
+        device_id: Any = _UNSET,
+    ) -> dict[str, Any]:
         if not self._is_configured():
             return {
                 "ok": False,
@@ -198,12 +396,20 @@ class SpotifyProvider(BaseProvider):
             }
 
         try:
-            response = self._api_request(method, path)
+            response = self._api_request(method, path, body=body, device_id=device_id)
         except HttpError:
             return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
         except Exception:  # noqa: BLE001 — token refresh errors bubble here
             return {"ok": False, "message": _SPOTIFY_DEFAULT_ERROR, "state": None}
 
+        return self._handle_command_response(response)
+
+    def _handle_command_response(self, response: HttpResponse) -> dict[str, Any]:
+        """Map a control-command response to the ``{ok, message, state}`` shape.
+
+        On success it pulls fresh truth inline so the UI never waits on the next
+        poll tick to reflect play/pause/volume/device changes.
+        """
         if response.status == 401:
             with self._token_lock:
                 self._access_token = None
@@ -220,8 +426,6 @@ class SpotifyProvider(BaseProvider):
                 "state": None,
             }
 
-        # Command worked — pull fresh truth inline so the UI never waits on
-        # the next poll tick to reflect play/pause/volume changes.
         try:
             self.refresh()
         except Exception as exc:  # noqa: BLE001 — never let inline refresh break the command
@@ -232,6 +436,46 @@ class SpotifyProvider(BaseProvider):
             "message": "ok",
             "state": self.state_store.get_state().spotify.to_dict(),
         }
+
+    # ---- list fetch / cache helpers --------------------------------------
+
+    def _list_get(self, path: str) -> tuple[dict[str, Any], None] | tuple[None, str]:
+        """GET a JSON list endpoint. Returns ``(payload, None)`` or ``(None, message)``."""
+        try:
+            response = self._api_request("GET", path)
+        except Exception:  # noqa: BLE001 — network/token errors → localized message
+            return None, _SPOTIFY_DEFAULT_ERROR
+        if response.status == 401:
+            with self._token_lock:
+                self._access_token = None
+            return None, spotify_status_message(401)
+        if not response.ok:
+            return None, spotify_status_message(response.status)
+        try:
+            payload = response.json() or {}
+        except Exception:  # noqa: BLE001
+            return None, _SPOTIFY_DEFAULT_ERROR
+        if not isinstance(payload, dict):
+            return None, _SPOTIFY_DEFAULT_ERROR
+        return payload, None
+
+    def _list_cache_get(self, key: str, ttl_seconds: int) -> list[dict[str, Any]] | None:
+        with self._list_cache_lock:
+            entry = self._list_cache.get(key)
+            if entry is None:
+                return None
+            stored_at, data = entry
+            if time.monotonic() - stored_at > ttl_seconds:
+                return None
+            return data
+
+    def _list_cache_set(self, key: str, data: list[dict[str, Any]]) -> None:
+        with self._list_cache_lock:
+            self._list_cache[key] = (time.monotonic(), data)
+
+    def _invalidate_list_cache(self, key: str) -> None:
+        with self._list_cache_lock:
+            self._list_cache.pop(key, None)
 
     # ---- HTTP / auth internals -------------------------------------------
 
@@ -244,17 +488,34 @@ class SpotifyProvider(BaseProvider):
             ]
         )
 
-    def _api_request(self, method: str, path: str) -> HttpResponse:
+    def _api_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, Any] | None = None,
+        device_id: Any = _UNSET,
+    ) -> HttpResponse:
         token = self._access_token_value()
         url = f"https://api.spotify.com/v1{path}"
-        if self.config.spotify.device_id and method in {"PUT", "POST"}:
-            query = urllib.parse.urlencode(
-                {"device_id": self.config.spotify.device_id}
+        if method in {"PUT", "POST"}:
+            # ``_UNSET`` → fall back to the configured default device; an explicit
+            # value (including None/"") lets callers target a device or suppress
+            # the query entirely (e.g. the transfer step carries it in the body).
+            effective_device = (
+                self.config.spotify.device_id if device_id is _UNSET else device_id
             )
-            separator = "&" if "?" in url else "?"
-            url = f"{url}{separator}{query}"
+            if effective_device:
+                query = urllib.parse.urlencode({"device_id": effective_device})
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}{query}"
 
-        body = b"" if method in {"POST", "PUT"} else None
+        if body is not None:
+            request_body: bytes | None = json.dumps(body).encode("utf-8")
+        elif method in {"POST", "PUT"}:
+            request_body = b""
+        else:
+            request_body = None
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -262,7 +523,7 @@ class SpotifyProvider(BaseProvider):
         return self._http.request(
             method,
             url,
-            body=body,
+            body=request_body,
             headers=headers,
             timeout=self.config.spotify.timeout_seconds,
         )

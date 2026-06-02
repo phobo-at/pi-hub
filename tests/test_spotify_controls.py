@@ -10,9 +10,17 @@ from smart_display.models import ProviderSnapshot, SpotifyState
 from smart_display.providers.spotify_provider import (
     SpotifyProvider,
     build_spotify_state_from_payload,
+    map_spotify_devices,
+    map_spotify_playlists,
     spotify_status_message,
 )
 from tests._support import FakeHttpClient, make_app_config, make_state_store
+
+
+def _json_body(call) -> dict:
+    import json
+
+    return json.loads((call.body or b"").decode("utf-8"))
 
 
 PLAYING_PAYLOAD = {
@@ -320,6 +328,188 @@ class SpotifyStatusMessageTest(unittest.TestCase):
             message = spotify_status_message(status)
             self.assertNotIn("ae", message.lower().replace("warten", ""))
             self.assertNotIn("?", message)
+
+
+class SpotifyMapperTest(unittest.TestCase):
+    """The picker consumes a flattened, Pi-friendly shape — verify the maps."""
+
+    def test_map_devices_flattens_and_sorts(self) -> None:
+        raw = [
+            {"id": "b", "name": "Zimmer", "type": "Speaker", "is_active": True, "volume_percent": 30},
+            {"id": "a", "name": "Bad", "type": "Speaker", "is_restricted": True},
+            "garbage",
+        ]
+        devices = map_spotify_devices(raw)
+        # Non-dict entries dropped; remaining sorted case-insensitively by name.
+        self.assertEqual([d["name"] for d in devices], ["Bad", "Zimmer"])
+        self.assertTrue(devices[1]["is_active"])
+        self.assertTrue(devices[0]["is_restricted"])
+        self.assertIsNone(devices[0]["volume_percent"])
+
+    def test_map_playlists_picks_smallest_image_and_skips_uriless(self) -> None:
+        raw = [
+            {
+                "uri": "spotify:playlist:1",
+                "name": "Morgens",
+                "images": [
+                    {"url": "big.jpg", "width": 640},
+                    {"url": "small.jpg", "width": 60},
+                ],
+                "tracks": {"total": 12},
+            },
+            {"name": "kein uri"},  # dropped
+            {"uri": "spotify:playlist:2", "name": "Ohne Bild", "images": []},
+        ]
+        playlists = map_spotify_playlists(raw)
+        self.assertEqual(len(playlists), 2)
+        self.assertEqual(playlists[0]["image_url"], "small.jpg")
+        self.assertEqual(playlists[0]["track_count"], 12)
+        self.assertIsNone(playlists[1]["image_url"])
+
+    def test_map_playlists_falls_back_to_last_image_when_unsized(self) -> None:
+        raw = [
+            {
+                "uri": "spotify:playlist:1",
+                "name": "Mosaik",
+                "images": [{"url": "a.jpg"}, {"url": "b.jpg"}],
+            }
+        ]
+        # Playlist mosaics carry null widths — take the last (smallest) entry.
+        self.assertEqual(map_spotify_playlists(raw)[0]["image_url"], "b.jpg")
+
+
+class SpotifyDeviceListTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.provider, self.fake = _configured_provider(Path(self._tmp.name))
+
+    def test_list_devices_maps_and_caches(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/devices",
+            status=200,
+            body={"devices": [{"id": "x", "name": "Box", "type": "Speaker", "is_active": True}]},
+        )
+
+        first = self.provider.list_devices()
+        second = self.provider.list_devices()
+
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["devices"][0]["name"], "Box")
+        self.assertEqual(second["devices"][0]["name"], "Box")
+        # Second call served from the short TTL cache — only one upstream hit.
+        self.assertEqual(
+            len(self.fake.calls_matching("GET", "https://api.spotify.com/v1/me/player/devices")),
+            1,
+        )
+
+    def test_list_devices_403_maps_to_german_message(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/devices",
+            status=403,
+            body={"error": "forbidden"},
+        )
+        result = self.provider.list_devices()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["message"], "Spotify-Aktion nicht erlaubt.")
+        self.assertEqual(result["devices"], [])
+
+    def test_list_playlists_requests_configured_limit(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/playlists?limit=50",
+            status=200,
+            body={"items": [{"uri": "spotify:playlist:1", "name": "P", "images": []}]},
+        )
+        result = self.provider.list_playlists()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["playlists"][0]["uri"], "spotify:playlist:1")
+
+    def test_list_devices_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            provider = SpotifyProvider(
+                make_app_config(Path(tmp)), make_state_store(Path(tmp)), http_client=FakeHttpClient()
+            )
+            result = provider.list_devices()
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["devices"], [])
+
+
+class SpotifyStartPlaybackTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.provider, self.fake = _configured_provider(Path(self._tmp.name))
+
+    def _seed_play_routes(self) -> None:
+        self.fake.add_response("PUT", "https://api.spotify.com/v1/me/player", status=204)
+        self.fake.add_response(
+            "PUT",
+            "https://api.spotify.com/v1/me/player/play?device_id=box-1",
+            status=204,
+        )
+        self.fake.add_response(
+            "GET", "https://api.spotify.com/v1/me/player", status=200, body=PLAYING_PAYLOAD
+        )
+
+    def test_start_playback_transfers_then_plays_context(self) -> None:
+        self._seed_play_routes()
+
+        result = self.provider.start_playback("box-1", "spotify:playlist:42")
+
+        self.assertTrue(result["ok"])
+        self.assertIsNotNone(result["state"])
+        # Transfer step carries the device in the body, not the query.
+        transfer = self.fake.calls_matching("PUT", "https://api.spotify.com/v1/me/player")[0]
+        self.assertEqual(_json_body(transfer), {"device_ids": ["box-1"], "play": False})
+        # Play step targets the chosen device via query + context_uri body.
+        play = self.fake.calls_matching(
+            "PUT", "https://api.spotify.com/v1/me/player/play?device_id=box-1"
+        )[0]
+        self.assertEqual(_json_body(play), {"context_uri": "spotify:playlist:42"})
+
+    def test_start_playback_track_uri_uses_uris(self) -> None:
+        self._seed_play_routes()
+        self.provider.start_playback("box-1", "spotify:track:abc")
+        play = self.fake.calls_matching(
+            "PUT", "https://api.spotify.com/v1/me/player/play?device_id=box-1"
+        )[0]
+        self.assertEqual(_json_body(play), {"uris": ["spotify:track:abc"]})
+
+    def test_start_playback_continues_when_transfer_fails(self) -> None:
+        self.fake.add_error(
+            "PUT", "https://api.spotify.com/v1/me/player", HttpError("transfer boom")
+        )
+        self.fake.add_response(
+            "PUT", "https://api.spotify.com/v1/me/player/play?device_id=box-1", status=204
+        )
+        self.fake.add_response(
+            "GET", "https://api.spotify.com/v1/me/player", status=200, body=PLAYING_PAYLOAD
+        )
+
+        result = self.provider.start_playback("box-1", "spotify:playlist:42")
+
+        self.assertTrue(result["ok"])
+
+    def test_start_playback_play_404_maps_to_no_device(self) -> None:
+        self.fake.add_response("PUT", "https://api.spotify.com/v1/me/player", status=204)
+        self.fake.add_response(
+            "PUT", "https://api.spotify.com/v1/me/player/play?device_id=box-1", status=404
+        )
+
+        result = self.provider.start_playback("box-1", "spotify:playlist:42")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["message"], "Kein aktives Spotify-Gerät.")
+        self.assertIsNone(result["state"])
+
+    def test_start_playback_without_device_rejected(self) -> None:
+        result = self.provider.start_playback("   ")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["message"], "Kein Gerät ausgewählt.")
+        self.assertEqual(self.fake.calls, [])
 
 
 if __name__ == "__main__":

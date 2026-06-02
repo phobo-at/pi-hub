@@ -680,6 +680,14 @@
     spotifyProgressElapsed: document.getElementById("spotify-progress-elapsed"),
     spotifyProgressTotal: document.getElementById("spotify-progress-total"),
     spotifyProgressFill: document.getElementById("spotify-progress-fill"),
+    spotifyOpenPicker: document.getElementById("spotify-open-picker"),
+    spotifyOpenPickerIcon: document.getElementById("spotify-open-picker-icon"),
+    picker: document.getElementById("spotify-picker"),
+    pickerBackdrop: document.getElementById("spotify-picker-backdrop"),
+    pickerClose: document.getElementById("spotify-picker-close"),
+    pickerDevices: document.getElementById("spotify-picker-devices"),
+    pickerPlaylists: document.getElementById("spotify-picker-playlists"),
+    pickerTransfer: document.getElementById("spotify-picker-transfer"),
     screensaver: document.getElementById("screensaver"),
     // Plan C1: two stacked image slots for crossfade. The active one is
     // visible; the inactive one holds the next image preloaded at opacity 0.
@@ -1225,6 +1233,12 @@
     if (nodes.cardsColumn) {
       nodes.cardsColumn.classList.toggle("is-spotify-active", showControls);
     }
+    // The "Musik starten" trigger only makes sense when Spotify is reachable
+    // (idle or playing). Offline/unconfigured/expired-token → hide it so it
+    // never opens an overlay that can only report an error.
+    if (nodes.spotifyOpenPicker) {
+      nodes.spotifyOpenPicker.classList.toggle("is-hidden", !spotify.connected);
+    }
     setIcon(nodes.spotifyPreviousIcon, "previous");
     setIcon(nodes.spotifyNextIcon, "next");
     setIcon(nodes.spotifyToggleIcon, spotify.is_playing ? "pause" : "play");
@@ -1400,6 +1414,192 @@
     renderSpotify(spotifyState);
   }
 
+  // ---- Spotify Connect picker (start music on a chosen speaker) ----------
+  // Devices + playlists are fetched lazily when the overlay opens, never on the
+  // poll loop — hitting the Spotify API only on a deliberate tap keeps the Pi
+  // idle. The selected device persists across re-opens while it stays present.
+  const PICKER_PLAYLIST_LIMIT = 24;
+  let pickerSelectedDeviceId = null;
+
+  async function fetchJson(endpoint) {
+    try {
+      const response = await fetch(endpoint, { cache: "no-store" });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body || body.ok === false) {
+        return { ok: false, message: (body && body.message) || "Netzwerkfehler." };
+      }
+      return body;
+    } catch (error) {
+      return { ok: false, message: "Netzwerkfehler." };
+    }
+  }
+
+  function pickerMessage(text) {
+    const node = document.createElement("p");
+    node.className = "picker__message";
+    node.textContent = text;
+    return node;
+  }
+
+  function openSpotifyPicker() {
+    if (!nodes.picker) {
+      return;
+    }
+    nodes.picker.classList.add("is-open");
+    nodes.picker.setAttribute("aria-hidden", "false");
+    loadPickerData();
+  }
+
+  function closeSpotifyPicker() {
+    if (!nodes.picker) {
+      return;
+    }
+    nodes.picker.classList.remove("is-open");
+    nodes.picker.setAttribute("aria-hidden", "true");
+  }
+
+  async function loadPickerData() {
+    if (nodes.pickerDevices) {
+      nodes.pickerDevices.replaceChildren(pickerMessage("Geräte werden geladen …"));
+    }
+    if (nodes.pickerPlaylists) {
+      nodes.pickerPlaylists.replaceChildren(pickerMessage("Playlists werden geladen …"));
+    }
+    const [devicesResult, playlistsResult] = await Promise.all([
+      fetchJson("/api/spotify/devices"),
+      fetchJson("/api/spotify/sources"),
+    ]);
+    renderPickerDevices(devicesResult);
+    renderPickerPlaylists(playlistsResult);
+  }
+
+  function updatePickerSelection() {
+    if (!nodes.pickerDevices) {
+      return;
+    }
+    nodes.pickerDevices.querySelectorAll(".picker-device").forEach((chip) => {
+      chip.classList.toggle("is-selected", chip.dataset.deviceId === pickerSelectedDeviceId);
+    });
+    if (nodes.pickerTransfer) {
+      nodes.pickerTransfer.disabled = !pickerSelectedDeviceId;
+    }
+  }
+
+  function renderPickerDevices(result) {
+    const container = nodes.pickerDevices;
+    if (!container) {
+      return;
+    }
+    container.replaceChildren();
+    if (!result.ok) {
+      container.appendChild(pickerMessage(result.message || "Geräte konnten nicht geladen werden."));
+      return;
+    }
+    const devices = result.devices || [];
+    if (!devices.length) {
+      container.appendChild(
+        pickerMessage("Keine Geräte gefunden. Speaker in der Spotify-App aufwecken."),
+      );
+      pickerSelectedDeviceId = null;
+      if (nodes.pickerTransfer) {
+        nodes.pickerTransfer.disabled = true;
+      }
+      return;
+    }
+    const selectable = devices.filter((device) => device.id);
+    // Keep an existing selection if the device is still around; otherwise prefer
+    // the currently active device, falling back to the first selectable one.
+    if (!selectable.some((device) => device.id === pickerSelectedDeviceId)) {
+      const active = selectable.find((device) => device.is_active);
+      pickerSelectedDeviceId = (active || selectable[0] || {}).id || null;
+    }
+    devices.forEach((device) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "picker-device";
+      if (!device.id) {
+        chip.disabled = true;
+      } else {
+        chip.dataset.deviceId = device.id;
+      }
+      const icon = document.createElement("span");
+      icon.className = "picker-device__icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = icons.device;
+      const label = document.createElement("span");
+      label.className = "picker-device__label";
+      label.textContent = [device.name, device.type].filter(Boolean).join(" · ");
+      chip.appendChild(icon);
+      chip.appendChild(label);
+      if (device.id) {
+        chip.addEventListener("click", () => {
+          pickerSelectedDeviceId = device.id;
+          updatePickerSelection();
+        });
+      }
+      container.appendChild(chip);
+    });
+    updatePickerSelection();
+  }
+
+  function renderPickerPlaylists(result) {
+    const container = nodes.pickerPlaylists;
+    if (!container) {
+      return;
+    }
+    container.replaceChildren();
+    if (!result.ok) {
+      container.appendChild(pickerMessage(result.message || "Playlists konnten nicht geladen werden."));
+      return;
+    }
+    const playlists = (result.playlists || []).slice(0, PICKER_PLAYLIST_LIMIT);
+    if (!playlists.length) {
+      container.appendChild(pickerMessage("Keine Playlists gefunden."));
+      return;
+    }
+    playlists.forEach((playlist) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "picker-playlist";
+      const art = document.createElement("span");
+      art.className = "picker-playlist__art";
+      if (playlist.image_url) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.alt = "";
+        img.src = playlist.image_url;
+        art.appendChild(img);
+      }
+      const name = document.createElement("span");
+      name.className = "picker-playlist__name";
+      name.textContent = playlist.name || "Playlist";
+      card.appendChild(art);
+      card.appendChild(name);
+      card.addEventListener("click", () => startFromPicker(playlist.uri));
+      container.appendChild(card);
+    });
+  }
+
+  async function startFromPicker(contextUri) {
+    if (!pickerSelectedDeviceId) {
+      showToast("Bitte zuerst ein Gerät wählen.");
+      return;
+    }
+    const result = await postJson("/api/spotify/play", {
+      device_id: pickerSelectedDeviceId,
+      context_uri: contextUri || null,
+    });
+    if (result.ok) {
+      if (result.state) {
+        applySpotifyState(result.state);
+      }
+      closeSpotifyPicker();
+    } else {
+      showToast(result.message || "Spotify nicht erreichbar.");
+    }
+  }
+
   // Plan C1: crossfade state. ``activeSlot`` is the <img> currently visible;
   // the next fetch writes into the hidden slot, waits for its ``load`` event,
   // then toggles the ``is-active`` class to trigger the CSS opacity swap.
@@ -1498,6 +1698,7 @@
       return;
     }
     screensaverActive = true;
+    closeSpotifyPicker();
     nodes.screensaver.classList.add("is-active");
     loadScreensaverImage();
     window.clearInterval(slideshowTimer);
@@ -1627,6 +1828,20 @@
         }
       }, 120);
     });
+    if (nodes.spotifyOpenPicker) {
+      setIcon(nodes.spotifyOpenPickerIcon, "device");
+      nodes.spotifyOpenPicker.addEventListener("click", openSpotifyPicker);
+    }
+    if (nodes.pickerClose) {
+      nodes.pickerClose.addEventListener("click", closeSpotifyPicker);
+    }
+    if (nodes.pickerBackdrop) {
+      nodes.pickerBackdrop.addEventListener("click", closeSpotifyPicker);
+    }
+    if (nodes.pickerTransfer) {
+      nodes.pickerTransfer.addEventListener("click", () => startFromPicker(null));
+    }
+
     window.addEventListener("resize", () => {
       window.clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(() => render(state, { force: true }), 80);

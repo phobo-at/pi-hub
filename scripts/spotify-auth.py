@@ -14,7 +14,14 @@ Prerequisite in the Spotify developer dashboard
         http://127.0.0.1:8888/callback
 
 The scopes requested match what smart_display.providers.spotify_provider needs:
-read playback state + control playback (play/pause/next/previous/volume).
+read playback state + control playback (play/pause/next/previous/volume) +
+read the user's own playlists so the picker overlay can start music on a
+chosen Spotify Connect speaker.
+
+NOTE: ``playlist-read-private`` was added for the Connect picker. If you minted
+your refresh token before that, re-run this helper and replace
+``SPOTIFY_REFRESH_TOKEN`` — otherwise ``GET /me/playlists`` returns 403 and the
+playlist list stays empty.
 """
 from __future__ import annotations
 
@@ -30,7 +37,11 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
-SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+SCOPES = (
+    "user-read-playback-state user-modify-playback-state "
+    "user-read-currently-playing playlist-read-private "
+    "playlist-read-collaborative"
+)
 AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 

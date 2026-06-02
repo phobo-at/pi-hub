@@ -57,6 +57,7 @@ class SpotifyConfig:
     device_id: str
     market: str
     timeout_seconds: int
+    playlists_limit: int = 50
 
 
 @dataclass(slots=True)
@@ -197,6 +198,7 @@ def load_config_from_mapping(
             device_id=str(mapping.get("spotify", {}).get("device_id", "")),
             market=str(mapping.get("spotify", {}).get("market", "AT")),
             timeout_seconds=int(mapping.get("spotify", {}).get("timeout_seconds", 10)),
+            playlists_limit=int(mapping.get("spotify", {}).get("playlists_limit", 50)),
         ),
         screensaver=ScreensaverConfig(
             enabled=parse_bool(mapping.get("screensaver", {}).get("enabled", True)),
@@ -320,6 +322,7 @@ def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
         "SPOTIFY_DEVICE_ID": ("spotify", "device_id"),
         "SPOTIFY_MARKET": ("spotify", "market"),
         "SPOTIFY_TIMEOUT_SECONDS": ("spotify", "timeout_seconds"),
+        "SPOTIFY_PLAYLISTS_LIMIT": ("spotify", "playlists_limit"),
         "SCREENSAVER_ENABLED": ("screensaver", "enabled"),
         "SCREENSAVER_IDLE_TIMEOUT_SECONDS": ("screensaver", "idle_timeout_seconds"),
         "SCREENSAVER_IMAGE_DURATION_SECONDS": (

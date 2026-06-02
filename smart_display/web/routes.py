@@ -162,6 +162,36 @@ def create_blueprint() -> Blueprint:
             return jsonify({"ok": False, "message": "volume_percent fehlt oder ist ungültig."}), 400
         return jsonify(services["spotify_provider"].set_volume(volume_percent))
 
+    @blueprint.get("/api/spotify/devices")
+    @local_only
+    def spotify_devices():
+        """Available Spotify Connect devices for the picker overlay. Fetched
+        on demand (not on the poll loop) and lightly cached in the provider."""
+        services = current_app.extensions["smart_display"]
+        return jsonify(services["spotify_provider"].list_devices())
+
+    @blueprint.get("/api/spotify/sources")
+    @local_only
+    def spotify_sources():
+        """The user's own Spotify playlists — the picker's "what to play" list."""
+        services = current_app.extensions["smart_display"]
+        return jsonify(services["spotify_provider"].list_playlists())
+
+    @blueprint.post("/api/spotify/play")
+    @local_only
+    def spotify_play():
+        services = current_app.extensions["smart_display"]
+        payload = request.get_json(silent=True) or {}
+        device_id = payload.get("device_id")
+        if not isinstance(device_id, str) or not device_id.strip():
+            return jsonify({"ok": False, "message": "device_id fehlt oder ist ungültig."}), 400
+        context_uri = payload.get("context_uri")
+        if context_uri is not None and not isinstance(context_uri, str):
+            return jsonify({"ok": False, "message": "context_uri ist ungültig."}), 400
+        return jsonify(
+            services["spotify_provider"].start_playback(device_id, context_uri)
+        )
+
     @blueprint.get("/health")
     def health():
         services = current_app.extensions["smart_display"]

@@ -33,7 +33,8 @@
     "refresh_token": "",
     "device_id": "",
     "market": "AT",
-    "timeout_seconds": 10
+    "timeout_seconds": 10,
+    "playlists_limit": 50
   },
   "screensaver": {
     "enabled": true,

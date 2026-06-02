@@ -142,7 +142,13 @@
         <article class="card spotify-card" id="spotify-card">
           <header class="card__header">
             <h2 class="card__title">Spotify Wiedergabe</h2>
-            <span class="status-pill is-hidden" id="spotify-status">Laden</span>
+            <div class="card__header-actions">
+              <button type="button" class="pill-button is-hidden" id="spotify-open-picker" aria-label="Musik auf Gerät starten">
+                <span class="pill-button__icon" id="spotify-open-picker-icon" aria-hidden="true"></span>
+                <span class="pill-button__label">Musik starten</span>
+              </button>
+              <span class="status-pill is-hidden" id="spotify-status">Laden</span>
+            </div>
           </header>
           <div class="spotify-body">
             <div class="spotify-artwork" id="spotify-artwork"></div>
@@ -187,6 +193,29 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <div class="picker" id="spotify-picker" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Musik auf Gerät starten">
+      <div class="picker__backdrop" id="spotify-picker-backdrop"></div>
+      <div class="picker__sheet" role="document">
+        <header class="picker__header">
+          <h2 class="picker__title">Musik starten</h2>
+          <button type="button" class="picker__close" id="spotify-picker-close" aria-label="Schließen">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <section class="picker__section">
+          <div class="picker__section-head">
+            <h3 class="picker__section-title">Gerät</h3>
+            <button type="button" class="picker__transfer" id="spotify-picker-transfer" disabled>Hierher übertragen</button>
+          </div>
+          <div class="picker__devices" id="spotify-picker-devices"></div>
+        </section>
+        <section class="picker__section picker__section--grow">
+          <h3 class="picker__section-title">Playlist</h3>
+          <div class="picker__playlists" id="spotify-picker-playlists"></div>
+        </section>
+      </div>
+    </div>
 
     <aside class="screensaver" id="screensaver" aria-hidden="true">
       <img class="screensaver__image screensaver__image--a is-active" id="screensaver-image-a" alt="">
