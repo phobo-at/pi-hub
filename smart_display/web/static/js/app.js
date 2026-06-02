@@ -1803,30 +1803,45 @@
       }
     });
 
-    nodes.spotifyVolume.addEventListener("pointerdown", markVolumeBusy, { passive: true });
-    nodes.spotifyVolume.addEventListener("touchstart", markVolumeBusy, { passive: true });
-    nodes.spotifyVolume.addEventListener("input", () => {
-      markVolumeBusy();
-      nodes.spotifyVolumeReadout.textContent = `${nodes.spotifyVolume.value}%`;
-    });
-    nodes.spotifyVolume.addEventListener("change", () => {
+    // Commit the slider value to the backend. Routed through one helper so both
+    // `input` (fires continuously while dragging — the reliable signal on the
+    // touch kiosk) and `change` (final value on release) drive it. `input` is
+    // debounced so a drag sends only the value the finger settles on; `change`
+    // commits immediately. Relying on `change` alone was the bug: on the kiosk
+    // a poll mid-drag could reset the thumb, so the release committed an
+    // unchanged value (a no-op) — direct API calls worked, the slider didn't.
+    function commitVolume(rawValue, debounceMs) {
       window.clearTimeout(volumeCommitTimer);
-      const targetValue = Number(nodes.spotifyVolume.value);
+      const targetValue = Math.max(0, Math.min(100, Math.round(Number(rawValue))));
       volumeLastSent = targetValue;
       markVolumeBusy();
       volumeCommitTimer = window.setTimeout(async () => {
         const result = await postJson("/api/spotify/volume", {
           volume_percent: targetValue,
         });
-        if (result.ok && result.state) {
-          applySpotifyState(result.state);
-        } else if (result.ok === false) {
-          // Command failed — release the dirty lock so future snapshots render.
+        if (result.ok) {
+          // Hold the user's value: Spotify's GET /me/player lags several seconds
+          // in reporting the new device volume, so keep the dirty/busy guard
+          // (renderSpotify reconciles once a poll confirms within tolerance)
+          // instead of snapping back to the stale inline-refresh value.
+          markVolumeBusy();
+        } else {
           delete nodes.spotifyVolume.dataset.dirty;
           volumeLastSent = null;
           showToast(result.message || "Spotify nicht erreichbar.");
         }
-      }, 120);
+      }, debounceMs);
+    }
+
+    nodes.spotifyVolume.addEventListener("pointerdown", markVolumeBusy, { passive: true });
+    nodes.spotifyVolume.addEventListener("touchstart", markVolumeBusy, { passive: true });
+    nodes.spotifyVolume.addEventListener("input", () => {
+      markVolumeBusy();
+      nodes.spotifyVolumeReadout.textContent = `${nodes.spotifyVolume.value}%`;
+      commitVolume(nodes.spotifyVolume.value, 250);
+    });
+    nodes.spotifyVolume.addEventListener("change", () => {
+      commitVolume(nodes.spotifyVolume.value, 0);
     });
     if (nodes.spotifyOpenPicker) {
       setIcon(nodes.spotifyOpenPickerIcon, "device");
