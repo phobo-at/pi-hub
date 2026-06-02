@@ -41,6 +41,8 @@ def build_spotify_state_from_payload(
         volume_percent=device.get("volume_percent"),
         supports_volume=supports_volume,
         can_control=can_control,
+        progress_ms=payload.get("progress_ms"),
+        duration_ms=item.get("duration_ms"),
         empty_message="Derzeit keine Wiedergabe.",
     )
 

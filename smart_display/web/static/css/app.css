@@ -577,6 +577,21 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
   display: none;
 }
 
+/* The QLOCKTWO word-clock faces eat a square block of vertical space. To keep
+   the hero panel calm and unclipped on 1024x600, drop the forecast to two
+   days (Heute + Morgen) for those faces. Reacts instantly to the touch
+   face-cycle via the existing body[data-watch-face] hook — no JS needed.
+   The third chip stays in the DOM (negligible) but is hidden. */
+body[data-watch-face="qlocktwo"] .hero-weather__forecast,
+body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body[data-watch-face="qlocktwo"] .forecast-chip:nth-child(n + 3),
+body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
+  display: none;
+}
+
 .forecast-chip {
   display: grid;
   gap: 10px;
@@ -827,6 +842,48 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
   color: var(--muted);
   font-size: 14px;
   font-weight: 700;
+}
+
+.spotify-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.spotify-progress__time {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.spotify-progress__track {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.spotify-progress__fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: var(--accent);
+  /* Matches the 1 s interpolation tick so the bar glides instead of stepping. */
+  transition: width 1s linear;
+}
+
+.spotify-card.is-inactive .spotify-progress {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotify-progress__fill {
+    transition: none;
+  }
 }
 
 .spotify-controls {
@@ -1162,57 +1219,68 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
     font-size: 14px;
   }
 
+  /* Active Spotify tile gets the lion's share of the right column on 1024x600.
+     The .is-inactive overrides below stay compact for the no-playback state. */
   .spotify-body {
-    grid-template-columns: 54px 1fr;
-    gap: 10px;
+    grid-template-columns: 84px 1fr;
+    gap: 14px;
   }
 
   .spotify-artwork {
-    width: 54px;
-    height: 54px;
-    border-radius: 14px;
+    width: 84px;
+    height: 84px;
+    border-radius: 18px;
   }
 
   .spotify-track {
-    font-size: 16px;
+    font-size: 21px;
   }
 
   .spotify-artist,
   .spotify-device {
-    margin-top: 2px;
-    font-size: 12px;
+    margin-top: 4px;
+    font-size: 14px;
   }
 
   .spotify-device-row {
-    gap: 6px;
-    margin-top: 6px;
+    gap: 8px;
+    margin-top: 8px;
   }
 
   .spotify-device-badge {
-    padding: 5px 8px;
-    font-size: 11px;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .spotify-volume-readout {
     display: none;
   }
 
+  .spotify-progress {
+    margin-top: 12px;
+  }
+
+  .spotify-progress__time {
+    font-size: 12px;
+  }
+
   .spotify-controls {
-    gap: 10px;
+    gap: 12px;
+    margin-top: 12px;
   }
 
   .spotify-actions {
-    gap: 6px;
+    gap: 10px;
   }
 
   .icon-button {
-    width: 46px;
-    height: 46px;
+    width: 58px;
+    height: 58px;
   }
 
   .icon-button__icon {
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
   }
 
   .spotify-volume {

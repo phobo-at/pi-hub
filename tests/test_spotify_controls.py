@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from smart_display.http_client import HttpError
-from smart_display.models import ProviderSnapshot
+from smart_display.models import ProviderSnapshot, SpotifyState
 from smart_display.providers.spotify_provider import (
     SpotifyProvider,
     build_spotify_state_from_payload,
@@ -100,6 +100,35 @@ class SpotifyStateTest(unittest.TestCase):
         state = build_spotify_state_from_payload(payload, ProviderSnapshot(status="ok"))
         self.assertFalse(state.can_control)
         self.assertFalse(state.supports_volume)
+
+    def test_progress_and_duration_taken_from_payload(self) -> None:
+        payload = {
+            "is_playing": True,
+            "progress_ms": 61_000,
+            "device": {"name": "Wohnzimmer", "type": "Speaker", "is_restricted": False},
+            "item": {
+                "name": "Track",
+                "duration_ms": 225_000,
+                "artists": [{"name": "Artist"}],
+                "album": {"images": []},
+            },
+        }
+        state = build_spotify_state_from_payload(payload, ProviderSnapshot(status="ok"))
+        self.assertEqual(state.progress_ms, 61_000)
+        self.assertEqual(state.duration_ms, 225_000)
+        # Round-trips cleanly through the cache serialisation.
+        self.assertEqual(SpotifyState.from_dict(state.to_dict()).progress_ms, 61_000)
+        self.assertEqual(SpotifyState.from_dict(state.to_dict()).duration_ms, 225_000)
+
+    def test_progress_and_duration_default_to_none_when_absent(self) -> None:
+        payload = {
+            "is_playing": False,
+            "device": {"name": "Box", "type": "Speaker", "is_restricted": False},
+            "item": {"name": "Track", "artists": [], "album": {"images": []}},
+        }
+        state = build_spotify_state_from_payload(payload, ProviderSnapshot(status="ok"))
+        self.assertIsNone(state.progress_ms)
+        self.assertIsNone(state.duration_ms)
 
 
 class SpotifyControlFlowTest(unittest.TestCase):

@@ -25,13 +25,22 @@ def _section(section_date: str, *titles: str) -> CalendarDaySection:
 
 class ComputeDayLabelTest(unittest.TestCase):
     def test_today(self) -> None:
-        self.assertEqual(compute_day_label("2026-04-08", "2026-04-08"), "Heute")
+        # 2026-04-08 is a Wednesday
+        self.assertEqual(
+            compute_day_label("2026-04-08", "2026-04-08"), "Heute · Mittwoch"
+        )
 
     def test_tomorrow(self) -> None:
-        self.assertEqual(compute_day_label("2026-04-09", "2026-04-08"), "Morgen")
+        # 2026-04-09 is a Thursday
+        self.assertEqual(
+            compute_day_label("2026-04-09", "2026-04-08"), "Morgen · Donnerstag"
+        )
 
     def test_day_after_tomorrow(self) -> None:
-        self.assertEqual(compute_day_label("2026-04-10", "2026-04-08"), "Übermorgen")
+        # 2026-04-10 is a Friday
+        self.assertEqual(
+            compute_day_label("2026-04-10", "2026-04-08"), "Übermorgen · Freitag"
+        )
 
     def test_further_future_uses_weekday(self) -> None:
         # 2026-04-13 is a Monday
@@ -62,11 +71,17 @@ class ApplyDayLabelsAcrossMidnightTest(unittest.TestCase):
         ]
 
         before = [label for _section_ignored, label in apply_day_labels(sections, "2026-04-08")]
-        self.assertEqual(before, ["Heute", "Morgen", "Übermorgen"])
+        self.assertEqual(
+            before,
+            ["Heute · Mittwoch", "Morgen · Donnerstag", "Übermorgen · Freitag"],
+        )
 
         # Simulate the client waking past midnight without a fresh /api/state poll.
         after = [label for _section_ignored, label in apply_day_labels(sections, "2026-04-09")]
-        self.assertEqual(after, ["Mittwoch", "Heute", "Morgen"])
+        self.assertEqual(
+            after,
+            ["Mittwoch", "Heute · Donnerstag", "Morgen · Freitag"],
+        )
 
     def test_offline_stale_events_keep_weekday_label(self) -> None:
         # App has been offline for two days; the cached sections are stale but

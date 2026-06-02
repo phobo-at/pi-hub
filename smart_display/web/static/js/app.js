@@ -675,6 +675,10 @@
     spotifyNext: document.getElementById("spotify-next"),
     spotifyNextIcon: document.getElementById("spotify-next-icon"),
     spotifyVolume: document.getElementById("spotify-volume"),
+    spotifyProgress: document.getElementById("spotify-progress"),
+    spotifyProgressElapsed: document.getElementById("spotify-progress-elapsed"),
+    spotifyProgressTotal: document.getElementById("spotify-progress-total"),
+    spotifyProgressFill: document.getElementById("spotify-progress-fill"),
     screensaver: document.getElementById("screensaver"),
     // Plan C1: two stacked image slots for crossfade. The active one is
     // visible; the inactive one holds the next image preloaded at opacity 0.
@@ -690,6 +694,82 @@
   let volumeLastSent = null;
   const VOLUME_BUSY_MS = 1500;
   const VOLUME_TOLERANCE = 2;
+
+  // Spotify playback-progress baseline. Polls only arrive every 3–4 s, so the
+  // visible bar is interpolated locally from the last payload. `null` hides the
+  // bar (no track / not controllable / no duration). `receivedAt` is a
+  // performance.now() stamp so we don't depend on Pi↔browser clock sync.
+  let spotifyProgress = null;
+  let spotifyProgressTimer = null;
+
+  function formatClockMs(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function renderSpotifyProgress() {
+    if (!nodes.spotifyProgress) {
+      return;
+    }
+    if (!spotifyProgress) {
+      nodes.spotifyProgress.style.display = "none";
+      return;
+    }
+    nodes.spotifyProgress.style.display = "";
+    const { progressMs, durationMs, isPlaying, receivedAt } = spotifyProgress;
+    const elapsedSincePoll = isPlaying ? performance.now() - receivedAt : 0;
+    const pos = Math.min(progressMs + elapsedSincePoll, durationMs);
+    const ratio = durationMs > 0 ? Math.max(0, Math.min(1, pos / durationMs)) : 0;
+    nodes.spotifyProgressFill.style.width = `${(ratio * 100).toFixed(2)}%`;
+    nodes.spotifyProgressElapsed.textContent = formatClockMs(pos);
+    nodes.spotifyProgressTotal.textContent = formatClockMs(durationMs);
+  }
+
+  // Drive the bar once per second, independent of the /api/state render dedup
+  // so it keeps moving even when nothing else in the payload changed. Only ticks
+  // while a track is actually playing — paused/idle states stay static so the
+  // Pi isn't woken every second for nothing.
+  function ensureProgressTimer() {
+    if (spotifyProgressTimer !== null) {
+      return;
+    }
+    spotifyProgressTimer = window.setInterval(renderSpotifyProgress, 1000);
+  }
+
+  function stopProgressTimer() {
+    if (spotifyProgressTimer !== null) {
+      window.clearInterval(spotifyProgressTimer);
+      spotifyProgressTimer = null;
+    }
+  }
+
+  // Update the interpolation baseline from a fresh payload. Kept separate from
+  // renderSpotify so it runs on every poll, even when render() short-circuits.
+  function updateSpotifyProgress(spotify) {
+    const showControls = Boolean(spotify.can_control || spotify.supports_volume);
+    const durationMs =
+      typeof spotify.duration_ms === "number" ? spotify.duration_ms : null;
+    const progressMs =
+      typeof spotify.progress_ms === "number" ? spotify.progress_ms : null;
+    if (!showControls || !spotify.track_title || durationMs === null || progressMs === null) {
+      spotifyProgress = null;
+    } else {
+      spotifyProgress = {
+        progressMs,
+        durationMs,
+        isPlaying: Boolean(spotify.is_playing),
+        receivedAt: performance.now(),
+      };
+    }
+    if (spotifyProgress && spotifyProgress.isPlaying) {
+      ensureProgressTimer();
+    } else {
+      stopProgressTimer();
+    }
+    renderSpotifyProgress();
+  }
 
   function markVolumeBusy() {
     volumeBusyUntil = performance.now() + VOLUME_BUSY_MS;
@@ -949,20 +1029,22 @@
     const sectionDate = Date.UTC(sectionParts[0], sectionParts[1] - 1, sectionParts[2]);
     const today = Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2]);
     const diffDays = Math.round((sectionDate - today) / 86_400_000);
+    // Weekday name for every case — use UTC noon so the Intl formatter lands on
+    // the right weekday regardless of TZ.
+    const display = new Date(sectionDate + 12 * 3_600_000);
+    const raw = WEEKDAY_FMT.format(display);
+    const weekday = raw.charAt(0).toUpperCase() + raw.slice(1);
     if (diffDays === 0) {
-      return "Heute";
+      return `Heute · ${weekday}`;
     }
     if (diffDays === 1) {
-      return "Morgen";
+      return `Morgen · ${weekday}`;
     }
     if (diffDays === 2) {
-      return "Übermorgen";
+      return `Übermorgen · ${weekday}`;
     }
-    // Fall through to weekday name — covers future days > 2 and stale/offline past dates.
-    // Use UTC noon so the Intl formatter lands on the right weekday regardless of TZ.
-    const display = new Date(sectionDate + 12 * 3_600_000);
-    const label = WEEKDAY_FMT.format(display);
-    return label.charAt(0).toUpperCase() + label.slice(1);
+    // Future days > 2 and stale/offline past dates: plain weekday name.
+    return weekday;
   }
 
   // Plan B8: after the A3 backend rewrite the server always emits
@@ -1060,9 +1142,7 @@
     const labels = sections.map((section) =>
       computeDayLabel(section.section_date, todayIso),
     );
-    const sectionHasLabel = labels.map(
-      (label) => label.length > 0 && label !== "Heute",
-    );
+    const sectionHasLabel = labels.map((label) => label.length > 0);
     const sectionItemCounts = sections.map((section) => section.items.length);
 
     const availableHeight = nodes.calendarList.clientHeight;
@@ -1206,7 +1286,12 @@
 
   function stateRenderKey(nextState) {
     try {
-      return JSON.stringify(nextState || {});
+      // Exclude the Spotify playback position from the dedup key: it advances
+      // every poll and would otherwise force a full weather/calendar re-render
+      // each time. The progress bar is driven separately via the 1 s tick.
+      return JSON.stringify(nextState || {}, (innerKey, value) =>
+        innerKey === "progress_ms" || innerKey === "duration_ms" ? undefined : value,
+      );
     } catch (error) {
       return "";
     }
@@ -1215,6 +1300,9 @@
   function render(nextState, options = {}) {
     const next = nextState || state;
     const key = stateRenderKey(next);
+    // Refresh the progress baseline on every poll, before the dedup short-circuit,
+    // so the bar stays accurate even when nothing else in the payload changed.
+    updateSpotifyProgress(next.spotify || {});
     if (!options.force && key && key === lastRenderedStateKey) {
       state = next;
       return;

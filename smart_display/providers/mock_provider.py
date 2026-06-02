@@ -109,5 +109,7 @@ class MockProvider(BaseProvider):
                     device_type="Speaker",
                     volume_percent=42,
                     supports_volume=True,
+                    progress_ms=72_000,
+                    duration_ms=251_000,
                 ),
             )

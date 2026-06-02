@@ -30,9 +30,9 @@ def compute_day_label(section_date_iso: str, today_iso: str) -> str:
     """Return the German label for a calendar section date.
 
     Rules:
-    - ``section_date == today`` → "Heute"
-    - ``section_date == today + 1`` → "Morgen"
-    - ``section_date == today + 2`` → "Übermorgen"
+    - ``section_date == today`` → "Heute · <Wochentag>"
+    - ``section_date == today + 1`` → "Morgen · <Wochentag>"
+    - ``section_date == today + 2`` → "Übermorgen · <Wochentag>"
     - anything else (future or past/stale) → full German weekday name
 
     Invalid ISO dates return an empty string; the caller decides how to render
@@ -44,13 +44,14 @@ def compute_day_label(section_date_iso: str, today_iso: str) -> str:
     except ValueError:
         return ""
     diff = (section_date - today).days
+    weekday = GERMAN_WEEKDAYS_LONG[section_date.weekday()]
     if diff == 0:
-        return "Heute"
+        return f"Heute · {weekday}"
     if diff == 1:
-        return "Morgen"
+        return f"Morgen · {weekday}"
     if diff == 2:
-        return "Übermorgen"
-    return GERMAN_WEEKDAYS_LONG[section_date.weekday()]
+        return f"Übermorgen · {weekday}"
+    return weekday
 
 
 def apply_day_labels(

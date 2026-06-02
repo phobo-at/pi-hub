@@ -210,6 +210,8 @@ class SpotifyState:
     volume_percent: int | None = None
     supports_volume: bool = False
     can_control: bool = False
+    progress_ms: int | None = None
+    duration_ms: int | None = None
     empty_message: str = "Derzeit keine Wiedergabe."
 
     def to_dict(self) -> dict[str, Any]:
@@ -226,6 +228,8 @@ class SpotifyState:
             "volume_percent": self.volume_percent,
             "supports_volume": self.supports_volume,
             "can_control": self.can_control,
+            "progress_ms": self.progress_ms,
+            "duration_ms": self.duration_ms,
             "empty_message": self.empty_message,
         }
 
@@ -249,6 +253,16 @@ class SpotifyState:
             ),
             supports_volume=bool(data.get("supports_volume", False)),
             can_control=bool(data.get("can_control", False)),
+            progress_ms=(
+                int(data.get("progress_ms"))
+                if data.get("progress_ms") is not None
+                else None
+            ),
+            duration_ms=(
+                int(data.get("duration_ms"))
+                if data.get("duration_ms") is not None
+                else None
+            ),
             empty_message=str(data.get("empty_message", "Derzeit keine Wiedergabe.")),
         )
 
