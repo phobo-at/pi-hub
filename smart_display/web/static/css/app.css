@@ -653,6 +653,34 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   min-height: 0;
 }
 
+/* When a controllable Spotify session is playing, the calendar shrinks to its
+   content (capped at 48% so a busy day still scrolls via the row budget) and
+   Spotify takes the rest — room for a big now-playing artwork. JS toggles the
+   class (no :has() so it works on both Chromium and the WPE/cog kiosk). Idle
+   falls back to the rule above: calendar fills, Spotify stays compact. */
+.cards-column.is-spotify-active {
+  grid-template-rows: fit-content(48%) minmax(0, 1fr);
+}
+
+.cards-column.is-spotify-active .spotify-card {
+  justify-content: center;
+}
+
+.cards-column.is-spotify-active .spotify-body {
+  grid-template-columns: 150px 1fr;
+  gap: 18px;
+}
+
+.cards-column.is-spotify-active .spotify-artwork {
+  width: 150px;
+  height: 150px;
+  border-radius: 22px;
+}
+
+.cards-column.is-spotify-active .spotify-track {
+  font-size: 24px;
+}
+
 .card {
   display: flex;
   flex-direction: column;

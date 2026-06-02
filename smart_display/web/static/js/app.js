@@ -660,6 +660,7 @@
     weatherForecast: document.getElementById("weather-forecast"),
     calendarStatus: document.getElementById("calendar-status"),
     calendarList: document.getElementById("calendar-list"),
+    cardsColumn: document.getElementById("cards-column"),
     spotifyStatus: document.getElementById("spotify-status"),
     spotifyCard: document.getElementById("spotify-card"),
     spotifyTrack: document.getElementById("spotify-track"),
@@ -1218,6 +1219,12 @@
     const showControls = Boolean(spotify.can_control || spotify.supports_volume);
     setStatus(nodes.spotifyStatus, snapshot);
     nodes.spotifyCard.classList.toggle("is-inactive", !showControls);
+    // Give Spotify the lion's share of the column (big artwork) only when there's
+    // a controllable session; idle keeps the calm calendar-fills layout so an
+    // empty tile never becomes a big blank box.
+    if (nodes.cardsColumn) {
+      nodes.cardsColumn.classList.toggle("is-spotify-active", showControls);
+    }
     setIcon(nodes.spotifyPreviousIcon, "previous");
     setIcon(nodes.spotifyNextIcon, "next");
     setIcon(nodes.spotifyToggleIcon, spotify.is_playing ? "pause" : "play");

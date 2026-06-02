@@ -51,6 +51,7 @@ Wichtige aktuelle UI-Entscheidungen:
 - Status-Badges werden im Normalzustand nicht angezeigt
 - Kalender zeigt heute, morgen und übermorgen (Tagesüberschriften mit Wochentag, z. B. „Heute · Montag“), aber nur so viel wie in den verfügbaren Platz passt
 - Spotify zeigt Transport-Controls nur bei sinnvoll steuerbarer Session, plus einen Track-Fortschrittsbalken (client-seitig interpoliert zwischen den Polls)
+- Bei laufender Spotify-Session bekommt die Spotify-Kachel die meiste Höhe der rechten Spalte (großes Artwork), die Termine-Kachel schrumpft auf Inhaltshöhe; im Leerlauf bleibt das ruhige Layout (Termine füllen, Spotify kompakt)
 - Die Hero-Uhr ist per Touch umschaltbar zwischen `classic` (digital), `qlocktwo` (deutsches Wortuhr-Raster) und `analog` (SVG). Start-Face kommt aus `app.watch_face` bzw. `APP_WATCH_FACE`, die Nutzerwahl persistiert im `localStorage` — kein Server-Roundtrip.
 
 Diese Entscheidungen nicht versehentlich zurückbauen.
