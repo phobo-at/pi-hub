@@ -918,7 +918,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 18px;
-  align-items: end;
+  /* Center the slider with the transport buttons — the slider is much shorter
+     than the round buttons, so `end` left it hugging the bottom edge. */
+  align-items: center;
   margin-top: 14px;
 }
 

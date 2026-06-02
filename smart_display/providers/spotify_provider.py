@@ -23,10 +23,16 @@ def build_spotify_state_from_payload(
     album = item.get("album") or {}
     images = album.get("images") or []
     album_art_url = images[1]["url"] if len(images) > 1 else images[0]["url"] if images else None
+    device_type = device.get("type")
     can_control = bool(device) and not bool(device.get("is_restricted", False))
     supports_volume = bool(device) and not bool(device.get("is_restricted", False))
     if device.get("supports_volume") is not None:
         supports_volume = bool(device.get("supports_volume"))
+    # Controlling the phone's own output volume from the display is awkward and
+    # rarely wanted — when playback runs on a smartphone, keep transport active
+    # but mark the volume as uncontrollable so the slider goes inactive.
+    if isinstance(device_type, str) and device_type.strip().lower() == "smartphone":
+        supports_volume = False
 
     return SpotifyState(
         snapshot=snapshot,
@@ -37,7 +43,7 @@ def build_spotify_state_from_payload(
         album_name=str(album.get("name", "")),
         album_art_url=album_art_url,
         device_name=device.get("name"),
-        device_type=device.get("type"),
+        device_type=device_type,
         volume_percent=device.get("volume_percent"),
         supports_volume=supports_volume,
         can_control=can_control,
