@@ -38,11 +38,15 @@ Wenn du eine Änderung planst, die diese Leitplanken verletzt, brauchst du eine 
 
 ## Aktueller UI-Maßstab
 
-Die aktuelle Zielhierarchie ist:
+Die UI hat zwei Screens, gewechselt per Wisch oder Seitenpunkt (rein client-seitig, beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf):
+
+**Screen 1 — Homescreen (Standard).** Die Zielhierarchie ist:
 
 - links: Uhrzeit, Datum, Wetter mit kompakter Vorschau (3 Tage; bei den platzhungrigen QLOCKTWO-Faces auf 2 Tage reduziert)
 - rechts oben: Termine
 - rechts unten: Spotify Wiedergabe
+
+**Screen 2 — Spotify-Steuerung.** Großes Artwork, Scrubbing, Transport- und Lautstärkeregler (mit Screen 1 synchron), die nächsten vier Titel der Warteschlange sowie das bestehende Geräte-/Playlist-Overlay. Die Warteschlange wird nur geladen, solange dieser Screen sichtbar ist; der Screensaver setzt die UI immer auf den Homescreen zurück.
 
 Wichtige aktuelle UI-Entscheidungen:
 

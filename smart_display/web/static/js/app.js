@@ -8,7 +8,23 @@
   let slideshowTimer = null;
   let resizeTimer = null;
   let midnightTimer = null;
-  let lastRenderedStateKey = "";
+  let activeScreen = "home";
+  let screenAnimationTimer = null;
+  let queueRefreshTimer = null;
+  let queueRequestInFlight = false;
+  let swipeStart = null;
+  let suppressClickUntil = 0;
+  const SCREEN_TRANSITION_MS = 220;
+  const QUEUE_REFRESH_MS = 30_000;
+  const SWIPE_MIN_X = 72;
+  const SWIPE_MAX_MS = 800;
+  const SWIPE_AXIS_RATIO = 1.3;
+  const lastRenderedSectionKeys = {
+    weather: "",
+    calendar: "",
+    spotify: "",
+  };
+  const SPOTIFY_PROGRESS_KEYS = new Set(["progress_ms", "duration_ms"]);
   // Plan B1 watchdog: while the screensaver is visible we re-POST
   // /api/screensaver/state periodically so the backend pause-TTL stays
   // fresh. If this loop stops firing (tab crash, JS exception), the TTL
@@ -621,6 +637,10 @@
   }
 
   const nodes = {
+    screenStage: document.getElementById("screen-stage"),
+    homeScreen: document.getElementById("screen-home"),
+    spotifyScreen: document.getElementById("screen-spotify"),
+    screenButtons: Array.from(document.querySelectorAll("[data-screen-target]")),
     date: document.getElementById("clock-date"),
     watchFace: document.getElementById("watch-face"),
     flipFace: document.getElementById("watch-face-flip"),
@@ -667,6 +687,9 @@
     spotifyArtist: document.getElementById("spotify-artist"),
     spotifyDevice: document.getElementById("spotify-device"),
     spotifyDeviceBadge: document.getElementById("spotify-device-badge"),
+    spotifyDeviceIcon: document.querySelector(
+      "#spotify-device-badge .spotify-device-badge__icon",
+    ),
     spotifyVolumeReadout: document.getElementById("spotify-volume-readout"),
     spotifyArtwork: document.getElementById("spotify-artwork"),
     spotifyPrevious: document.getElementById("spotify-previous"),
@@ -682,6 +705,29 @@
     spotifyProgressFill: document.getElementById("spotify-progress-fill"),
     spotifyOpenPicker: document.getElementById("spotify-open-picker"),
     spotifyOpenPickerIcon: document.getElementById("spotify-open-picker-icon"),
+    spotifyDetail: document.getElementById("spotify-detail"),
+    spotifyDetailStatus: document.getElementById("spotify-detail-status"),
+    spotifyDetailArtwork: document.getElementById("spotify-detail-artwork"),
+    spotifyDetailTrack: document.getElementById("spotify-detail-track"),
+    spotifyDetailArtist: document.getElementById("spotify-detail-artist"),
+    spotifyDetailAlbum: document.getElementById("spotify-detail-album"),
+    spotifyDetailDevice: document.getElementById("spotify-detail-device"),
+    spotifyDetailDeviceIcon: document.getElementById("spotify-detail-device-icon"),
+    spotifyDetailVolumeReadout: document.getElementById("spotify-detail-volume-readout"),
+    spotifyDetailPrevious: document.getElementById("spotify-detail-previous"),
+    spotifyDetailPreviousIcon: document.getElementById("spotify-detail-previous-icon"),
+    spotifyDetailToggle: document.getElementById("spotify-detail-toggle"),
+    spotifyDetailToggleIcon: document.getElementById("spotify-detail-toggle-icon"),
+    spotifyDetailNext: document.getElementById("spotify-detail-next"),
+    spotifyDetailNextIcon: document.getElementById("spotify-detail-next-icon"),
+    spotifyDetailVolume: document.getElementById("spotify-detail-volume"),
+    spotifyDetailSeek: document.getElementById("spotify-detail-seek"),
+    spotifyDetailProgressElapsed: document.getElementById("spotify-detail-progress-elapsed"),
+    spotifyDetailProgressTotal: document.getElementById("spotify-detail-progress-total"),
+    spotifyDetailOpenPicker: document.getElementById("spotify-detail-open-picker"),
+    spotifyDetailOpenPickerIcon: document.getElementById("spotify-detail-open-picker-icon"),
+    spotifyDetailQueueStatus: document.getElementById("spotify-detail-queue-status"),
+    spotifyDetailQueueList: document.getElementById("spotify-detail-queue-list"),
     picker: document.getElementById("spotify-picker"),
     pickerBackdrop: document.getElementById("spotify-picker-backdrop"),
     pickerClose: document.getElementById("spotify-picker-close"),
@@ -703,6 +749,15 @@
   let volumeLastSent = null;
   const VOLUME_BUSY_MS = 1500;
   const VOLUME_TOLERANCE = 2;
+  let seekDragging = false;
+  let seekHoldUntil = 0;
+  let seekItemKey = "";
+  // seekItemKey as it was when the current drag started, so a commit can be
+  // discarded if the track changed mid-drag.
+  let seekDragItemKey = "";
+  let seekLastCommitValue = null;
+  let seekLastCommitAt = 0;
+  const SEEK_HOLD_MS = 5000;
 
   // Spotify playback-progress baseline. Polls only arrive every 3–4 s, so the
   // visible bar is interpolated locally from the last payload. `null` hides the
@@ -719,21 +774,59 @@
   }
 
   function renderSpotifyProgress() {
-    if (!nodes.spotifyProgress) {
+    if (screensaverActive) {
       return;
     }
+    // Both screens stay in the DOM, so paint only the visible one — otherwise
+    // this 1 Hz tick writes five properties per call into a hidden subtree that
+    // still costs style recalc. setActiveScreen repaints on the way in.
+    const homeVisible = activeScreen === "home";
+    const detailVisible = activeScreen === "spotify";
     if (!spotifyProgress) {
-      nodes.spotifyProgress.style.display = "none";
+      if (nodes.spotifyProgress && homeVisible) {
+        nodes.spotifyProgress.style.display = "none";
+      }
+      if (nodes.spotifyDetailSeek && detailVisible && !seekDragging) {
+        nodes.spotifyDetailSeek.max = "0";
+        nodes.spotifyDetailSeek.value = "0";
+        nodes.spotifyDetailSeek.style.setProperty("--seek-percent", "0%");
+        nodes.spotifyDetailProgressElapsed.textContent = "0:00";
+        nodes.spotifyDetailProgressTotal.textContent = "0:00";
+      }
       return;
     }
-    nodes.spotifyProgress.style.display = "";
     const { progressMs, durationMs, isPlaying, receivedAt } = spotifyProgress;
     const elapsedSincePoll = isPlaying ? performance.now() - receivedAt : 0;
     const pos = Math.min(progressMs + elapsedSincePoll, durationMs);
     const ratio = durationMs > 0 ? Math.max(0, Math.min(1, pos / durationMs)) : 0;
-    nodes.spotifyProgressFill.style.width = `${(ratio * 100).toFixed(2)}%`;
-    nodes.spotifyProgressElapsed.textContent = formatClockMs(pos);
-    nodes.spotifyProgressTotal.textContent = formatClockMs(durationMs);
+    if (nodes.spotifyProgress && homeVisible) {
+      nodes.spotifyProgress.style.display = "";
+      nodes.spotifyProgressFill.style.transform = `scaleX(${ratio.toFixed(4)})`;
+      nodes.spotifyProgressElapsed.textContent = formatClockMs(pos);
+      nodes.spotifyProgressTotal.textContent = formatClockMs(durationMs);
+    }
+    if (nodes.spotifyDetailSeek && detailVisible && !seekDragging) {
+      nodes.spotifyDetailSeek.max = String(Math.max(0, Math.round(durationMs)));
+      nodes.spotifyDetailSeek.value = String(Math.max(0, Math.round(pos)));
+      nodes.spotifyDetailSeek.style.setProperty(
+        "--seek-percent",
+        `${(ratio * 100).toFixed(2)}%`,
+      );
+      nodes.spotifyDetailProgressElapsed.textContent = formatClockMs(pos);
+      nodes.spotifyDetailProgressTotal.textContent = formatClockMs(durationMs);
+    }
+  }
+
+  // The position the bar is *showing* right now, interpolated past the last
+  // poll. Optimistic updates carry this instead of the payload's stale
+  // progress_ms so the bar never rewinds. `null` when no track is playing.
+  function interpolatedProgressMs() {
+    if (!spotifyProgress) {
+      return null;
+    }
+    const { progressMs, durationMs, isPlaying, receivedAt } = spotifyProgress;
+    const elapsed = isPlaying ? performance.now() - receivedAt : 0;
+    return Math.round(Math.min(progressMs + elapsed, durationMs));
   }
 
   // Drive the bar once per second, independent of the /api/state render dedup
@@ -741,7 +834,7 @@
   // while a track is actually playing — paused/idle states stay static so the
   // Pi isn't woken every second for nothing.
   function ensureProgressTimer() {
-    if (spotifyProgressTimer !== null) {
+    if (spotifyProgressTimer !== null || screensaverActive) {
       return;
     }
     spotifyProgressTimer = window.setInterval(renderSpotifyProgress, 1000);
@@ -762,8 +855,29 @@
       typeof spotify.duration_ms === "number" ? spotify.duration_ms : null;
     const progressMs =
       typeof spotify.progress_ms === "number" ? spotify.progress_ms : null;
+    const itemKey = [
+      spotify.track_title || "",
+      spotify.artist_name || "",
+      durationMs === null ? "" : String(durationMs),
+    ].join("\u0000");
+    if (itemKey !== seekItemKey) {
+      seekItemKey = itemKey;
+      seekHoldUntil = 0;
+      // Deliberately does NOT clear seekDragging: a poll must not cancel a drag
+      // the user's finger is still in. commitSeek discards the commit instead
+      // (seekDragItemKey), and pointerdown always re-arms a fresh drag.
+    }
     if (!showControls || !spotify.track_title || durationMs === null || progressMs === null) {
       spotifyProgress = null;
+    } else if (
+      performance.now() < seekHoldUntil &&
+      spotifyProgress &&
+      spotifyProgress.durationMs === durationMs
+    ) {
+      // Spotify's inline refresh can report the pre-seek position for several
+      // seconds. Keep the optimistic local baseline briefly instead of snapping
+      // the thumb back; a later poll reconciles with provider truth.
+      spotifyProgress.isPlaying = Boolean(spotify.is_playing);
     } else {
       spotifyProgress = {
         progressMs,
@@ -782,9 +896,11 @@
 
   function markVolumeBusy() {
     volumeBusyUntil = performance.now() + VOLUME_BUSY_MS;
-    if (nodes.spotifyVolume) {
-      nodes.spotifyVolume.dataset.dirty = "1";
-    }
+    [nodes.spotifyVolume, nodes.spotifyDetailVolume]
+      .filter(Boolean)
+      .forEach((slider) => {
+        slider.dataset.dirty = "1";
+      });
   }
 
   let toastTimer = null;
@@ -875,7 +991,12 @@
     if (!node) {
       return;
     }
-    node.innerHTML = icons[iconName] || "";
+    const nextName = icons[iconName] ? iconName : "";
+    if (node.dataset.iconName === nextName) {
+      return;
+    }
+    node.innerHTML = icons[nextName] || "";
+    node.dataset.iconName = nextName;
   }
 
   function updateActiveWatchFace(force) {
@@ -903,6 +1024,10 @@
       return part ? part.value : "";
     };
     nodes.date.textContent = `${datePart("weekday")} · ${datePart("day")}. ${datePart("month")}`;
+    if (screensaverActive) {
+      updateScreensaverFlip(false);
+      return;
+    }
     if ((document.body.getAttribute("data-watch-face") || "flip") === "flip") {
       updateFlip(false);
     } else {
@@ -1222,96 +1347,152 @@
     }
   }
 
+  function spotifyVolumeSliders() {
+    return [nodes.spotifyVolume, nodes.spotifyDetailVolume].filter(Boolean);
+  }
+
+  function setSpotifyVolumeUi(value) {
+    const text = value === null ? "" : `${value}%`;
+    spotifyVolumeSliders().forEach((slider) => {
+      slider.value = String(value === null ? 0 : value);
+    });
+    nodes.spotifyVolumeReadout.textContent = text;
+    nodes.spotifyDetailVolumeReadout.textContent = text;
+  }
+
+  function clearSpotifyVolumeDirty() {
+    spotifyVolumeSliders().forEach((slider) => {
+      delete slider.dataset.dirty;
+    });
+    volumeLastSent = null;
+  }
+
   function renderSpotify(spotify) {
     const snapshot = spotify.snapshot || {};
     const showControls = Boolean(spotify.can_control || spotify.supports_volume);
+    const canSeek = Boolean(
+      spotify.can_control &&
+      typeof spotify.duration_ms === "number" &&
+      spotify.duration_ms > 0 &&
+      typeof spotify.progress_ms === "number",
+    );
     setStatus(nodes.spotifyStatus, snapshot);
+    setStatus(nodes.spotifyDetailStatus, snapshot);
     nodes.spotifyCard.classList.toggle("is-inactive", !showControls);
+    nodes.spotifyDetail.classList.toggle("is-inactive", !showControls);
     // Give Spotify the lion's share of the column (big artwork) only when there's
     // a controllable session; idle keeps the calm calendar-fills layout so an
     // empty tile never becomes a big blank box.
     if (nodes.cardsColumn) {
       nodes.cardsColumn.classList.toggle("is-spotify-active", showControls);
     }
-    // The "Musik starten" trigger only makes sense when Spotify is reachable
-    // (idle or playing). Offline/unconfigured/expired-token → hide it so it
-    // never opens an overlay that can only report an error.
-    if (nodes.spotifyOpenPicker) {
-      nodes.spotifyOpenPicker.classList.toggle("is-hidden", !spotify.connected);
-    }
+    // Picker triggers only make sense while Spotify is connected. Both screens
+    // share the same overlay and lazy device/playlist requests.
+    [nodes.spotifyOpenPicker, nodes.spotifyDetailOpenPicker]
+      .filter(Boolean)
+      .forEach((button) => button.classList.toggle("is-hidden", !spotify.connected));
+
     setIcon(nodes.spotifyPreviousIcon, "previous");
+    setIcon(nodes.spotifyDetailPreviousIcon, "previous");
     setIcon(nodes.spotifyNextIcon, "next");
-    setIcon(nodes.spotifyToggleIcon, spotify.is_playing ? "pause" : "play");
-    nodes.spotifyToggle.setAttribute(
-      "aria-label",
-      spotify.is_playing ? "Wiedergabe pausieren" : "Wiedergabe starten",
-    );
-    nodes.spotifyTrack.textContent =
+    setIcon(nodes.spotifyDetailNextIcon, "next");
+    const toggleIcon = spotify.is_playing ? "pause" : "play";
+    const toggleLabel = spotify.is_playing
+      ? "Wiedergabe pausieren"
+      : "Wiedergabe starten";
+    setIcon(nodes.spotifyToggleIcon, toggleIcon);
+    setIcon(nodes.spotifyDetailToggleIcon, toggleIcon);
+    nodes.spotifyToggle.setAttribute("aria-label", toggleLabel);
+    nodes.spotifyDetailToggle.setAttribute("aria-label", toggleLabel);
+
+    const trackLabel =
       spotify.track_title || spotify.empty_message || "Keine aktive Wiedergabe";
-    nodes.spotifyArtist.textContent =
+    const artistLabel =
       spotify.artist_name || snapshot.error_message || "Spotify nicht verbunden.";
-    setIcon(nodes.spotifyDeviceBadge.querySelector(".spotify-device-badge__icon"), "device");
+    nodes.spotifyTrack.textContent = trackLabel;
+    nodes.spotifyDetailTrack.textContent = trackLabel;
+    nodes.spotifyArtist.textContent = artistLabel;
+    nodes.spotifyDetailArtist.textContent = artistLabel;
+    nodes.spotifyDetailAlbum.textContent = spotify.album_name || "";
+
+    setIcon(nodes.spotifyDeviceIcon, "device");
+    setIcon(nodes.spotifyDetailDeviceIcon, "device");
     const deviceLabel = [spotify.device_name, spotify.device_type]
       .filter(Boolean)
       .join(" · ");
     nodes.spotifyDevice.textContent = deviceLabel || "Kein aktives Gerät";
-    nodes.spotifyVolumeReadout.textContent =
-      typeof spotify.volume_percent === "number" ? `${spotify.volume_percent}%` : "";
+    nodes.spotifyDetailDevice.textContent = deviceLabel || "Kein aktives Gerät";
 
-    if (spotify.album_art_url) {
-      nodes.spotifyArtwork.style.backgroundImage = `url("${spotify.album_art_url}")`;
-    } else {
-      nodes.spotifyArtwork.style.backgroundImage = "";
-    }
+    const artwork = spotify.album_art_url
+      ? `url(${JSON.stringify(spotify.album_art_url)})`
+      : "";
+    nodes.spotifyArtwork.style.backgroundImage = artwork;
+    nodes.spotifyDetailArtwork.style.backgroundImage = artwork;
+    nodes.spotifyDetailArtwork.setAttribute(
+      "aria-label",
+      spotify.album_name ? `Cover von ${spotify.album_name}` : "Kein Albumcover",
+    );
 
-    const disabled = !spotify.can_control;
-    nodes.spotifyPrevious.disabled = disabled;
-    nodes.spotifyToggle.disabled = disabled;
-    nodes.spotifyNext.disabled = disabled;
-    nodes.spotifyVolume.disabled = !spotify.supports_volume;
+    const transportDisabled = !spotify.can_control;
+    [
+      nodes.spotifyPrevious,
+      nodes.spotifyToggle,
+      nodes.spotifyNext,
+      nodes.spotifyDetailPrevious,
+      nodes.spotifyDetailToggle,
+      nodes.spotifyDetailNext,
+    ].forEach((button) => {
+      button.disabled = transportDisabled;
+    });
+    spotifyVolumeSliders().forEach((slider) => {
+      slider.disabled = !spotify.supports_volume;
+    });
+    nodes.spotifyDetailSeek.disabled = !canSeek;
 
-    // Plan A2: don't snap the slider back while the user is mid-drag or while
-    // the last user-sent value is still in flight. Spotify rounds volumes to
-    // the nearest step, so we accept a ±VOLUME_TOLERANCE reconciliation.
-    const slider = nodes.spotifyVolume;
+    // Keep both volume sliders in lockstep. Polls must not overwrite either
+    // while the user's value is in flight.
     const now = performance.now();
-    const incoming = typeof spotify.volume_percent === "number" ? spotify.volume_percent : null;
+    const incoming =
+      typeof spotify.volume_percent === "number" ? spotify.volume_percent : null;
     const busy = volumeBusyUntil > now;
-    const dirty = slider.dataset.dirty === "1";
+    const sliders = spotifyVolumeSliders();
+    const dirty = sliders.some((slider) => slider.dataset.dirty === "1");
+    const active = sliders.some((slider) => slider.matches(":active"));
 
     if (incoming === null) {
-      if (!dirty && !busy && !slider.matches(":active")) {
-        slider.value = "0";
-        nodes.spotifyVolumeReadout.textContent = "";
+      if (!dirty && !busy && !active) {
+        setSpotifyVolumeUi(null);
       }
       return;
     }
-
     if (busy) {
       return;
     }
-
     if (dirty) {
-      if (volumeLastSent !== null && Math.abs(incoming - volumeLastSent) <= VOLUME_TOLERANCE) {
-        delete slider.dataset.dirty;
-        volumeLastSent = null;
-        slider.value = String(incoming);
-        nodes.spotifyVolumeReadout.textContent = `${incoming}%`;
+      if (
+        volumeLastSent !== null &&
+        Math.abs(incoming - volumeLastSent) <= VOLUME_TOLERANCE
+      ) {
+        clearSpotifyVolumeDirty();
+        setSpotifyVolumeUi(incoming);
       }
       return;
     }
-
-    slider.value = String(incoming);
-    nodes.spotifyVolumeReadout.textContent = `${incoming}%`;
+    setSpotifyVolumeUi(incoming);
   }
 
-  function stateRenderKey(nextState) {
+  // Whether the cards column is in its Spotify-heavy layout. Read before and
+  // after renderSpotify so render() can tell when the calendar row was resized.
+  function spotifyColumnLayoutKey() {
+    return nodes.cardsColumn
+      ? nodes.cardsColumn.classList.contains("is-spotify-active")
+      : null;
+  }
+
+  function sectionRenderKey(section, omittedKeys = null) {
     try {
-      // Exclude the Spotify playback position from the dedup key: it advances
-      // every poll and would otherwise force a full weather/calendar re-render
-      // each time. The progress bar is driven separately via the 1 s tick.
-      return JSON.stringify(nextState || {}, (innerKey, value) =>
-        innerKey === "progress_ms" || innerKey === "duration_ms" ? undefined : value,
+      return JSON.stringify(section || {}, (innerKey, value) =>
+        omittedKeys && omittedKeys.has(innerKey) ? undefined : value,
       );
     } catch (error) {
       return "";
@@ -1320,21 +1501,42 @@
 
   function render(nextState, options = {}) {
     const next = nextState || state;
-    const key = stateRenderKey(next);
-    // Refresh the progress baseline on every poll, before the dedup short-circuit,
-    // so the bar stays accurate even when nothing else in the payload changed.
+    // Refresh the progress baseline on every poll before per-section dedup, so
+    // the bar stays accurate even when nothing else in the payload changed.
     updateSpotifyProgress(next.spotify || {});
-    if (!options.force && key && key === lastRenderedStateKey) {
-      state = next;
-      return;
-    }
     state = next;
-    if (key) {
-      lastRenderedStateKey = key;
+
+    // Provider jobs update independently. A Spotify timestamp must not rebuild
+    // the weather forecast and calendar (including forced layout measurement),
+    // and a weather refresh must not reparse all Spotify SVG controls.
+    const keys = {
+      weather: sectionRenderKey(state.weather),
+      calendar: sectionRenderKey(state.calendar),
+      spotify: sectionRenderKey(
+        state.spotify,
+        SPOTIFY_PROGRESS_KEYS,
+      ),
+    };
+    if (options.force || !keys.weather || keys.weather !== lastRenderedSectionKeys.weather) {
+      renderWeather(state.weather || {});
+      lastRenderedSectionKeys.weather = keys.weather;
     }
-    renderWeather(state.weather || {});
-    renderSpotify(state.spotify || {});
-    renderCalendar(state.calendar || {});
+    if (options.force || !keys.spotify || keys.spotify !== lastRenderedSectionKeys.spotify) {
+      const spotifyLayoutBefore = spotifyColumnLayoutKey();
+      renderSpotify(state.spotify || {});
+      lastRenderedSectionKeys.spotify = keys.spotify;
+      // renderSpotify toggles `is-spotify-active`, which resizes the calendar's
+      // grid row. renderCalendar budgets its visible rows from the live
+      // clientHeight, so it has to re-measure or it silently clips (or
+      // under-fills) against the previous height.
+      if (spotifyColumnLayoutKey() !== spotifyLayoutBefore) {
+        lastRenderedSectionKeys.calendar = "";
+      }
+    }
+    if (options.force || !keys.calendar || keys.calendar !== lastRenderedSectionKeys.calendar) {
+      renderCalendar(state.calendar || {});
+      lastRenderedSectionKeys.calendar = keys.calendar;
+    }
   }
 
   function scheduleMidnightRerender() {
@@ -1410,8 +1612,288 @@
       return;
     }
     state = { ...state, spotify: spotifyState };
-    lastRenderedStateKey = "";
-    renderSpotify(spotifyState);
+    lastRenderedSectionKeys.spotify = "";
+    render(state);
+  }
+
+  // ---- Screen navigation + on-demand Spotify queue ----------------------
+  function queueMessage(text) {
+    const message = document.createElement("p");
+    message.className = "spotify-detail__queue-message";
+    message.textContent = text;
+    return message;
+  }
+
+  function renderSpotifyQueue(result) {
+    const container = nodes.spotifyDetailQueueList;
+    if (!container) {
+      return;
+    }
+    const status = result && result.status ? result.status : "error";
+    nodes.spotifyDetailQueueStatus.textContent = status === "stale" ? "Cache" : "";
+    const items = result && Array.isArray(result.items)
+      ? result.items.slice(0, 4)
+      : [];
+    if (!result || result.ok === false || items.length === 0) {
+      const fallback =
+        (result && result.message) ||
+        (status === "empty" ? "Keine weiteren Titel." : "Warteschlange nicht erreichbar.");
+      container.replaceChildren(queueMessage(fallback));
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "spotify-detail__queue-item";
+
+      const art = document.createElement("div");
+      art.className = "spotify-detail__queue-art";
+      if (item.image_url) {
+        const image = document.createElement("img");
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.alt = "";
+        image.src = item.image_url;
+        art.appendChild(image);
+      }
+
+      const copy = document.createElement("div");
+      copy.className = "spotify-detail__queue-copy";
+      const title = document.createElement("div");
+      title.className = "spotify-detail__queue-title";
+      title.textContent = item.title || "Unbekannter Inhalt";
+      const subtitle = document.createElement("div");
+      subtitle.className = "spotify-detail__queue-subtitle";
+      subtitle.textContent = item.subtitle || (item.kind === "episode" ? "Podcast" : "Spotify");
+      copy.append(title, subtitle);
+      row.append(art, copy);
+      fragment.appendChild(row);
+    });
+    container.replaceChildren(fragment);
+  }
+
+  async function loadSpotifyQueue() {
+    if (
+      activeScreen !== "spotify" ||
+      screensaverActive ||
+      queueRequestInFlight
+    ) {
+      return;
+    }
+    queueRequestInFlight = true;
+    try {
+      const result = await fetchJson("/api/spotify/queue");
+      // The user may have left the page while the request was in flight. The
+      // result is harmless to retain, but avoid rebuilding hidden DOM then.
+      if (activeScreen === "spotify" && !screensaverActive) {
+        renderSpotifyQueue(result);
+      }
+    } finally {
+      queueRequestInFlight = false;
+    }
+  }
+
+  function stopQueueRefresh() {
+    window.clearInterval(queueRefreshTimer);
+    queueRefreshTimer = null;
+  }
+
+  function startQueueRefresh() {
+    stopQueueRefresh();
+    if (activeScreen !== "spotify" || screensaverActive) {
+      return;
+    }
+    loadSpotifyQueue();
+    queueRefreshTimer = window.setInterval(loadSpotifyQueue, QUEUE_REFRESH_MS);
+  }
+
+  function setActiveScreen(target, options = {}) {
+    if (!nodes.screenStage || !["home", "spotify"].includes(target)) {
+      return;
+    }
+    const animate = options.animate !== false;
+    if (target === activeScreen) {
+      return;
+    }
+
+    activeScreen = target;
+    nodes.screenStage.dataset.activeScreen = target;
+    if (!animate) {
+      nodes.screenStage.classList.add("is-instant");
+    } else {
+      nodes.screenStage.classList.add("is-animating");
+    }
+
+    [
+      [nodes.homeScreen, "home"],
+      [nodes.spotifyScreen, "spotify"],
+    ].forEach(([screen, name]) => {
+      const selected = name === target;
+      screen.classList.toggle("is-active", selected);
+      screen.setAttribute("aria-hidden", selected ? "false" : "true");
+      if (selected) {
+        screen.removeAttribute("inert");
+      } else {
+        screen.setAttribute("inert", "");
+      }
+    });
+    nodes.screenButtons.forEach((button) => {
+      const selected = button.dataset.screenTarget === target;
+      button.classList.toggle("is-active", selected);
+      if (selected) {
+        button.setAttribute("aria-current", "page");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    });
+
+    if (target === "spotify") {
+      // The home face is hidden but still in the DOM, so its second-hand timer
+      // would keep waking the Pi behind an invisible screen — same reasoning as
+      // applyWatchFace and showScreensaver.
+      stopAnalogSecondTick();
+      startQueueRefresh();
+    } else {
+      stopQueueRefresh();
+      applyWatchFace(document.body.getAttribute("data-watch-face") || "flip");
+    }
+    // Both progress renderers are gated on the visible screen, so repaint the
+    // one that just became visible instead of waiting up to a second for it.
+    renderSpotifyProgress();
+
+    window.clearTimeout(screenAnimationTimer);
+    if (!animate) {
+      // Force the no-transition state to apply to this class swap, then remove
+      // it so the next deliberate navigation can animate normally.
+      // eslint-disable-next-line no-unused-expressions
+      nodes.screenStage.offsetWidth;
+      nodes.screenStage.classList.remove("is-instant");
+      nodes.screenStage.classList.remove("is-animating");
+      return;
+    }
+    screenAnimationTimer = window.setTimeout(() => {
+      nodes.screenStage.classList.remove("is-animating");
+    }, SCREEN_TRANSITION_MS);
+  }
+
+  function swipeTargetIsInteractive(target) {
+    return Boolean(
+      target &&
+      target.closest &&
+      target.closest("button, input, label, a, [role='dialog'], .picker, .toast"),
+    );
+  }
+
+  function handleSwipeStart(event) {
+    if (
+      screensaverActive ||
+      event.isPrimary === false ||
+      (typeof event.button === "number" && event.button !== 0) ||
+      swipeTargetIsInteractive(event.target)
+    ) {
+      swipeStart = null;
+      return;
+    }
+    swipeStart = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      at: performance.now(),
+    };
+    if (nodes.screenStage.setPointerCapture) {
+      try {
+        nodes.screenStage.setPointerCapture(event.pointerId);
+      } catch (error) {
+        /* pointer capture is optional on older kiosk engines */
+      }
+    }
+  }
+
+  function handleSwipeEnd(event) {
+    if (!swipeStart || swipeStart.pointerId !== event.pointerId) {
+      return;
+    }
+    const gesture = swipeStart;
+    swipeStart = null;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    const elapsed = performance.now() - gesture.at;
+    if (
+      elapsed > SWIPE_MAX_MS ||
+      Math.abs(dx) < SWIPE_MIN_X ||
+      Math.abs(dx) < Math.abs(dy) * SWIPE_AXIS_RATIO
+    ) {
+      return;
+    }
+    const target = dx < 0 ? "spotify" : "home";
+    if (target === activeScreen) {
+      return;
+    }
+    suppressClickUntil = performance.now() + 150;
+    setActiveScreen(target);
+  }
+
+  function handleSwipeCancel() {
+    swipeStart = null;
+  }
+
+  // ---- Detail-screen seek ------------------------------------------------
+  function updateSeekPreview(rawValue) {
+    const duration = Number(nodes.spotifyDetailSeek.max || 0);
+    const value = Math.max(0, Math.min(duration, Math.round(Number(rawValue) || 0)));
+    const ratio = duration > 0 ? value / duration : 0;
+    nodes.spotifyDetailSeek.value = String(value);
+    nodes.spotifyDetailSeek.style.setProperty(
+      "--seek-percent",
+      `${(ratio * 100).toFixed(2)}%`,
+    );
+    nodes.spotifyDetailProgressElapsed.textContent = formatClockMs(value);
+    nodes.spotifyDetailProgressTotal.textContent = formatClockMs(duration);
+  }
+
+  async function commitSeek(rawValue) {
+    if (seekDragItemKey !== "" && seekDragItemKey !== seekItemKey) {
+      // The track changed under the drag (a poll, or another Spotify client).
+      // Committing now would seek the *new* item to a position the user never
+      // chose — the backend only range-checks, so it cannot catch this.
+      seekDragItemKey = "";
+      renderSpotifyProgress();
+      return;
+    }
+    seekDragItemKey = "";
+    const duration = Number(nodes.spotifyDetailSeek.max || 0);
+    const target = Math.max(0, Math.min(duration, Math.round(Number(rawValue) || 0)));
+    const now = performance.now();
+    if (
+      !duration ||
+      nodes.spotifyDetailSeek.disabled ||
+      (seekLastCommitValue === target && now - seekLastCommitAt < 500)
+    ) {
+      renderSpotifyProgress();
+      return;
+    }
+    seekLastCommitValue = target;
+    seekLastCommitAt = now;
+    seekHoldUntil = now + SEEK_HOLD_MS;
+    if (spotifyProgress) {
+      spotifyProgress.progressMs = target;
+      spotifyProgress.receivedAt = now;
+    }
+    renderSpotifyProgress();
+
+    const result = await postJson("/api/spotify/seek", { position_ms: target });
+    if (result.ok) {
+      if (result.state) {
+        // Preserve the user's target through Spotify's occasionally lagging
+        // inline GET; the five-second hold above later reconciles with truth.
+        applySpotifyState({ ...result.state, progress_ms: target });
+      }
+      return;
+    }
+    seekHoldUntil = 0;
+    updateSpotifyProgress(state.spotify || {});
+    showToast(result.message || "Spotify nicht erreichbar.");
   }
 
   // ---- Spotify Connect picker (start music on a chosen speaker) ----------
@@ -1595,6 +2077,7 @@
         applySpotifyState(result.state);
       }
       closeSpotifyPicker();
+      loadSpotifyQueue();
     } else {
       showToast(result.message || "Spotify nicht erreichbar.");
     }
@@ -1698,8 +2181,12 @@
       return;
     }
     screensaverActive = true;
+    setActiveScreen("home", { animate: false });
+    stopProgressTimer();
+    stopAnalogSecondTick();
     closeSpotifyPicker();
     nodes.screensaver.classList.add("is-active");
+    nodes.screensaver.setAttribute("aria-hidden", "false");
     loadScreensaverImage();
     window.clearInterval(slideshowTimer);
     slideshowTimer = window.setInterval(
@@ -1720,11 +2207,14 @@
     }
     screensaverActive = false;
     nodes.screensaver.classList.remove("is-active");
+    nodes.screensaver.setAttribute("aria-hidden", "true");
     window.clearInterval(slideshowTimer);
     window.clearInterval(screensaverHeartbeatTimer);
     screensaverHeartbeatTimer = null;
     resetIdleTimer();
     notifyScreensaverState(false);
+    updateClock();
+    applyWatchFace(document.body.getAttribute("data-watch-face") || "flip");
     fetchState();
   }
 
@@ -1771,36 +2261,89 @@
       nodes.toast.addEventListener("pointerdown", hideToast, { passive: true });
     }
 
-    nodes.spotifyToggle.addEventListener("click", async () => {
+    if (nodes.screenStage) {
+      nodes.spotifyScreen.setAttribute("inert", "");
+      nodes.screenStage.addEventListener("pointerdown", handleSwipeStart, { passive: true });
+      nodes.screenStage.addEventListener("pointerup", handleSwipeEnd, { passive: true });
+      nodes.screenStage.addEventListener("pointercancel", handleSwipeCancel, { passive: true });
+      nodes.screenStage.addEventListener(
+        "click",
+        (event) => {
+          if (performance.now() < suppressClickUntil) {
+            // One-shot: swallow only the synthetic click the gesture itself
+            // emits (a few ms after pointerup), never the user's next real tap.
+            // The deadline is the backstop for engines that emit no such click.
+            suppressClickUntil = 0;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        },
+        true,
+      );
+    }
+    nodes.screenButtons.forEach((button) => {
+      button.addEventListener("click", () => setActiveScreen(button.dataset.screenTarget));
+    });
+
+    async function toggleSpotifyPlayback() {
       const currentSpotify = state.spotify || {};
       const previousIsPlaying = Boolean(currentSpotify.is_playing);
-      // Optimistic flip so the button feels alive on touch.
-      applySpotifyState({ ...currentSpotify, is_playing: !previousIsPlaying });
+      // Optimistic flip so the button feels alive on touch. Carry the locally
+      // interpolated position: the payload's progress_ms is up to a poll
+      // interval stale, and applySpotifyState now rebuilds the progress
+      // baseline, so passing it through would rewind the bar on every tap.
+      const optimistic = { ...currentSpotify, is_playing: !previousIsPlaying };
+      const interpolated = interpolatedProgressMs();
+      if (interpolated !== null) {
+        optimistic.progress_ms = interpolated;
+      }
+      applySpotifyState(optimistic);
       const result = await postAction("/api/spotify/toggle");
       if (result.ok && result.state) {
         applySpotifyState(result.state);
       } else if (result.ok === false) {
-        applySpotifyState({ ...currentSpotify, is_playing: previousIsPlaying });
+        applySpotifyState({
+          ...currentSpotify,
+          is_playing: previousIsPlaying,
+          ...(interpolated === null ? {} : { progress_ms: interpolated }),
+        });
         showToast(result.message || "Spotify nicht erreichbar.");
       }
-    });
+    }
 
-    nodes.spotifyNext.addEventListener("click", async () => {
+    async function skipSpotifyNext() {
+      // A skip supersedes any optimistic seek hold — "previous" often restarts
+      // the *same* item, which the hold's item key cannot tell from a lagging
+      // refresh, and would otherwise pin the bar at the old position.
+      seekHoldUntil = 0;
       const result = await postAction("/api/spotify/next");
       if (result.ok && result.state) {
         applySpotifyState(result.state);
+        loadSpotifyQueue();
       } else if (result.ok === false) {
         showToast(result.message || "Spotify nicht erreichbar.");
       }
-    });
+    }
 
-    nodes.spotifyPrevious.addEventListener("click", async () => {
+    async function skipSpotifyPrevious() {
+      seekHoldUntil = 0;
       const result = await postAction("/api/spotify/previous");
       if (result.ok && result.state) {
         applySpotifyState(result.state);
+        loadSpotifyQueue();
       } else if (result.ok === false) {
         showToast(result.message || "Spotify nicht erreichbar.");
       }
+    }
+
+    [nodes.spotifyToggle, nodes.spotifyDetailToggle].forEach((button) => {
+      button.addEventListener("click", toggleSpotifyPlayback);
+    });
+    [nodes.spotifyNext, nodes.spotifyDetailNext].forEach((button) => {
+      button.addEventListener("click", skipSpotifyNext);
+    });
+    [nodes.spotifyPrevious, nodes.spotifyDetailPrevious].forEach((button) => {
+      button.addEventListener("click", skipSpotifyPrevious);
     });
 
     // Commit the slider value to the backend. Routed through one helper so both
@@ -1826,27 +2369,70 @@
           // instead of snapping back to the stale inline-refresh value.
           markVolumeBusy();
         } else {
-          delete nodes.spotifyVolume.dataset.dirty;
-          volumeLastSent = null;
+          clearSpotifyVolumeDirty();
           showToast(result.message || "Spotify nicht erreichbar.");
         }
       }, debounceMs);
     }
 
-    nodes.spotifyVolume.addEventListener("pointerdown", markVolumeBusy, { passive: true });
-    nodes.spotifyVolume.addEventListener("touchstart", markVolumeBusy, { passive: true });
-    nodes.spotifyVolume.addEventListener("input", () => {
-      markVolumeBusy();
-      nodes.spotifyVolumeReadout.textContent = `${nodes.spotifyVolume.value}%`;
-      commitVolume(nodes.spotifyVolume.value, 250);
+    spotifyVolumeSliders().forEach((slider) => {
+      slider.addEventListener("pointerdown", markVolumeBusy, { passive: true });
+      slider.addEventListener("touchstart", markVolumeBusy, { passive: true });
+      slider.addEventListener("input", () => {
+        const value = Math.max(0, Math.min(100, Math.round(Number(slider.value))));
+        markVolumeBusy();
+        setSpotifyVolumeUi(value);
+        commitVolume(value, 250);
+      });
+      slider.addEventListener("change", () => {
+        commitVolume(slider.value, 0);
+      });
     });
-    nodes.spotifyVolume.addEventListener("change", () => {
-      commitVolume(nodes.spotifyVolume.value, 0);
-    });
-    if (nodes.spotifyOpenPicker) {
-      setIcon(nodes.spotifyOpenPickerIcon, "device");
-      nodes.spotifyOpenPicker.addEventListener("click", openSpotifyPicker);
+
+    // `restart` is true only for pointerdown, which unambiguously begins a new
+    // drag. `input` must NOT re-capture mid-drag: it fires on every finger
+    // movement, and re-capturing after a track change would adopt the new
+    // item's key and defeat the guard in commitSeek.
+    function beginSeekDrag(restart) {
+      if (restart || !seekDragging) {
+        seekDragItemKey = seekItemKey;
+      }
+      seekDragging = true;
     }
+
+    nodes.spotifyDetailSeek.addEventListener(
+      "pointerdown",
+      () => beginSeekDrag(true),
+      { passive: true },
+    );
+    nodes.spotifyDetailSeek.addEventListener("input", () => {
+      beginSeekDrag(false);
+      updateSeekPreview(nodes.spotifyDetailSeek.value);
+    });
+    nodes.spotifyDetailSeek.addEventListener("change", () => {
+      seekDragging = false;
+      commitSeek(nodes.spotifyDetailSeek.value);
+    });
+    nodes.spotifyDetailSeek.addEventListener("pointerup", () => {
+      if (!seekDragging) {
+        return;
+      }
+      seekDragging = false;
+      commitSeek(nodes.spotifyDetailSeek.value);
+    }, { passive: true });
+    nodes.spotifyDetailSeek.addEventListener("pointercancel", () => {
+      seekDragging = false;
+      seekDragItemKey = "";
+      renderSpotifyProgress();
+    }, { passive: true });
+
+    setIcon(nodes.spotifyOpenPickerIcon, "device");
+    setIcon(nodes.spotifyDetailOpenPickerIcon, "device");
+    [nodes.spotifyOpenPicker, nodes.spotifyDetailOpenPicker]
+      .filter(Boolean)
+      .forEach((button) => {
+        button.addEventListener("click", openSpotifyPicker);
+      });
     if (nodes.pickerClose) {
       nodes.pickerClose.addEventListener("click", closeSpotifyPicker);
     }

@@ -42,7 +42,12 @@ class StateStore:
             return DashboardState.from_dict(self._state.to_dict())
 
     def to_dict(self) -> dict[str, Any]:
-        return self.get_state().to_dict()
+        # ``DashboardState.to_dict`` already returns a detached tree of plain
+        # dicts/lists. Re-hydrating a second DashboardState only to serialise it
+        # again made every local /api/state poll do the same deep conversion
+        # twice.
+        with self._lock:
+            return self._state.to_dict()
 
     def update_section(
         self, section_name: str, section: WeatherState | CalendarState | SpotifyState
@@ -183,4 +188,3 @@ class StateStore:
             ),
             system=system,
         )
-

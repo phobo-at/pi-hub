@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import urllib.parse
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -24,6 +25,11 @@ _UNSET: Any = object()
 # speaker the user just woke up; playlists change rarely, so they cache longer.
 _DEVICES_CACHE_TTL_SECONDS = 15
 _PLAYLISTS_CACHE_TTL_SECONDS = 600
+_QUEUE_CACHE_TTL_SECONDS = 15
+# Upper bound for serving a TTL-expired queue as last-known-good while Spotify
+# errors. Past this the honest "not reachable" message beats a plausible lie.
+_QUEUE_STALE_MAX_AGE_SECONDS = 300
+_QUEUE_ITEM_LIMIT = 4
 
 # Canned data so the picker overlay can be exercised at 1024x600 on the demo
 # server (APP_DEMO_MODE / local-demo.yaml) without a real Spotify account.
@@ -39,6 +45,12 @@ _DEMO_PLAYLISTS: list[dict[str, Any]] = [
     {"uri": "spotify:playlist:demo4", "name": "Laufrunde", "image_url": None, "track_count": 33},
     {"uri": "spotify:playlist:demo5", "name": "Kinderlieder", "image_url": None, "track_count": 25},
     {"uri": "spotify:playlist:demo6", "name": "Jazz Klassiker", "image_url": None, "track_count": 90},
+]
+_DEMO_QUEUE: list[dict[str, Any]] = [
+    {"title": "Idioteque", "subtitle": "Radiohead", "image_url": None, "kind": "track"},
+    {"title": "Morning Bell", "subtitle": "Radiohead", "image_url": None, "kind": "track"},
+    {"title": "Motion Picture Soundtrack", "subtitle": "Radiohead", "image_url": None, "kind": "track"},
+    {"title": "Untitled", "subtitle": "Radiohead", "image_url": None, "kind": "track"},
 ]
 
 
@@ -100,16 +112,89 @@ def map_spotify_playlists(raw: Any) -> list[dict[str, Any]]:
     return playlists
 
 
+def map_spotify_queue(raw: Any) -> list[dict[str, Any]]:
+    """Flatten tracks and episodes into the four rows used by the kiosk UI."""
+    items: list[dict[str, Any]] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or "other").lower()
+        title = str(item.get("name") or "Unbekannter Inhalt")
+        image_url: str | None = None
+
+        if kind == "track":
+            artists = item.get("artists") or []
+            subtitle = ", ".join(
+                str(artist.get("name"))
+                for artist in artists
+                if isinstance(artist, dict) and artist.get("name")
+            )
+            album = item.get("album") or {}
+            if isinstance(album, dict):
+                image_url = _smallest_image_url(album.get("images"))
+                if not subtitle:
+                    subtitle = str(album.get("name") or "Titel")
+        elif kind == "episode":
+            show = item.get("show") or {}
+            subtitle = (
+                str(show.get("name") or show.get("publisher") or "Podcast")
+                if isinstance(show, dict)
+                else "Podcast"
+            )
+            image_url = _smallest_image_url(item.get("images"))
+            if image_url is None and isinstance(show, dict):
+                image_url = _smallest_image_url(show.get("images"))
+        else:
+            subtitle = "Spotify"
+            image_url = _smallest_image_url(item.get("images"))
+
+        items.append(
+            {
+                "title": title,
+                "subtitle": subtitle,
+                "image_url": image_url,
+                "kind": kind,
+            }
+        )
+        if len(items) >= _QUEUE_ITEM_LIMIT:
+            break
+    return items
+
+
 def build_spotify_state_from_payload(
     payload: dict,
     snapshot: ProviderSnapshot,
 ) -> SpotifyState:
     device = payload.get("device") or {}
     item = payload.get("item") or {}
+    kind = str(item.get("type") or "track").lower()
     artists = item.get("artists") or []
     album = item.get("album") or {}
-    images = album.get("images") or []
-    album_art_url = images[1]["url"] if len(images) > 1 else images[0]["url"] if images else None
+    show = item.get("show") or {}
+    if kind == "episode":
+        images = item.get("images") or (show.get("images") if isinstance(show, dict) else []) or []
+        artist_name = (
+            str(show.get("name") or show.get("publisher") or "Podcast")
+            if isinstance(show, dict)
+            else "Podcast"
+        )
+        album_name = str(show.get("name") or "Podcast") if isinstance(show, dict) else "Podcast"
+    else:
+        images = album.get("images") if isinstance(album, dict) else []
+        images = images or []
+        artist_name = ", ".join(
+            str(artist.get("name", ""))
+            for artist in artists
+            if isinstance(artist, dict) and artist.get("name")
+        )
+        album_name = str(album.get("name", "")) if isinstance(album, dict) else ""
+    album_art_url = (
+        images[1].get("url")
+        if len(images) > 1 and isinstance(images[1], dict)
+        else images[0].get("url")
+        if images and isinstance(images[0], dict)
+        else None
+    )
     device_type = device.get("type")
     can_control = bool(device) and not bool(device.get("is_restricted", False))
     supports_volume = bool(device) and not bool(device.get("is_restricted", False))
@@ -126,8 +211,8 @@ def build_spotify_state_from_payload(
         connected=True,
         is_playing=bool(payload.get("is_playing", False)),
         track_title=str(item.get("name", "")),
-        artist_name=", ".join(str(artist.get("name", "")) for artist in artists if artist.get("name")),
-        album_name=str(album.get("name", "")),
+        artist_name=artist_name,
+        album_name=album_name,
         album_art_url=album_art_url,
         device_name=device.get("name"),
         device_type=device_type,
@@ -199,7 +284,13 @@ class SpotifyProvider(BaseProvider):
             return
 
         try:
-            response = self._api_request("GET", "/me/player")
+            # Without `additional_types` Spotify keeps legacy-client behaviour and
+            # returns `item: null` for anything that isn't a track — a playing
+            # podcast would render as "Keine aktive Wiedergabe". Opt in explicitly
+            # so the episode branch in build_spotify_state_from_payload is reachable.
+            response = self._api_request(
+                "GET", "/me/player?additional_types=episode"
+            )
         except Exception as exc:
             self.logger.exception("spotify refresh failed")
             self.state_store.mark_error(
@@ -266,10 +357,16 @@ class SpotifyProvider(BaseProvider):
         return self._send_command("PUT", endpoint)
 
     def next_track(self) -> dict[str, Any]:
-        return self._send_command("POST", "/me/player/next")
+        result = self._send_command("POST", "/me/player/next")
+        if result.get("ok"):
+            self._invalidate_list_cache("queue")
+        return result
 
     def previous_track(self) -> dict[str, Any]:
-        return self._send_command("POST", "/me/player/previous")
+        result = self._send_command("POST", "/me/player/previous")
+        if result.get("ok"):
+            self._invalidate_list_cache("queue")
+        return result
 
     def set_volume(self, volume_percent: int) -> dict[str, Any]:
         value = max(0, min(int(volume_percent), 100))
@@ -277,6 +374,33 @@ class SpotifyProvider(BaseProvider):
             "PUT",
             f"/me/player/volume?{urllib.parse.urlencode({'volume_percent': value})}",
         )
+
+    def seek_to(self, position_ms: int) -> dict[str, Any]:
+        """Seek within the current item without allowing accidental track skips."""
+        if type(position_ms) is not int:
+            return {
+                "ok": False,
+                "message": "Wiedergabeposition ist ungültig.",
+                "state": None,
+            }
+        value = position_ms
+
+        current = self.state_store.get_state().spotify
+        duration = current.duration_ms
+        if value < 0 or duration is None or duration <= 0 or value > duration:
+            return {
+                "ok": False,
+                "message": "Wiedergabeposition ist ungültig.",
+                "state": None,
+            }
+
+        if self.config.app.demo_mode and not self.config.spotify.enabled:
+            updated = replace(current, progress_ms=value)
+            self.state_store.update_section(self.section_name, updated)
+            return {"ok": True, "message": "ok", "state": updated.to_dict()}
+
+        query = urllib.parse.urlencode({"position_ms": value})
+        return self._send_command("PUT", f"/me/player/seek?{query}")
 
     def start_playback(
         self, device_id: str, context_uri: str | None = None
@@ -337,7 +461,10 @@ class SpotifyProvider(BaseProvider):
         # The device list is now stale (active device changed) — drop it so the
         # next picker open reflects reality.
         self._invalidate_list_cache("devices")
-        return self._handle_command_response(response)
+        result = self._handle_command_response(response)
+        if result.get("ok"):
+            self._invalidate_list_cache("queue")
+        return result
 
     def list_devices(self) -> dict[str, Any]:
         """Available Connect devices for the picker. On-demand, lightly cached."""
@@ -379,6 +506,58 @@ class SpotifyProvider(BaseProvider):
         playlists = map_spotify_playlists(payload.get("items"))
         self._list_cache_set("playlists", playlists)
         return {"ok": True, "message": "ok", "playlists": playlists}
+
+    def list_queue(self) -> dict[str, Any]:
+        """Return the short upcoming queue, keeping the last good result on errors."""
+        if self.config.app.demo_mode and not self.config.spotify.enabled:
+            return {
+                "ok": True,
+                "status": "ok",
+                "message": "ok",
+                "items": list(_DEMO_QUEUE),
+            }
+        if not self._is_configured():
+            return {
+                "ok": False,
+                "status": "error",
+                "message": "Spotify ist nicht konfiguriert.",
+                "items": [],
+            }
+
+        cached = self._list_cache_get("queue", _QUEUE_CACHE_TTL_SECONDS)
+        if cached is not None:
+            return self._queue_result(cached)
+
+        payload, error = self._list_get("/me/player/queue")
+        if error is not None:
+            stale = self._list_cache_peek("queue", _QUEUE_STALE_MAX_AGE_SECONDS)
+            if stale is None:
+                return {"ok": False, "status": "error", "message": error, "items": []}
+            if not stale:
+                # A cached empty queue is a real answer ("Keine weiteren Titel."),
+                # not degraded data — don't dress it up as a cache hit.
+                return self._queue_result(stale)
+            return {
+                "ok": True,
+                "status": "stale",
+                "message": "Warteschlange zuletzt erfolgreich geladen.",
+                "items": stale,
+            }
+
+        items = map_spotify_queue(payload.get("queue"))
+        self._list_cache_set("queue", items)
+        return self._queue_result(items)
+
+    @staticmethod
+    def _queue_result(items: list[dict[str, Any]]) -> dict[str, Any]:
+        if items:
+            return {"ok": True, "status": "ok", "message": "ok", "items": items}
+        return {
+            "ok": True,
+            "status": "empty",
+            "message": "Keine weiteren Titel.",
+            "items": [],
+        }
 
     def _send_command(
         self,
@@ -472,6 +651,23 @@ class SpotifyProvider(BaseProvider):
     def _list_cache_set(self, key: str, data: list[dict[str, Any]]) -> None:
         with self._list_cache_lock:
             self._list_cache[key] = (time.monotonic(), data)
+
+    def _list_cache_peek(
+        self, key: str, max_age_seconds: float
+    ) -> list[dict[str, Any]] | None:
+        """Return TTL-expired cached data for last-known-good fallbacks.
+
+        Bounded on purpose: serving an unbounded-age queue as ``ok`` would let a
+        long Spotify outage show tracks that finished playing hours ago.
+        """
+        with self._list_cache_lock:
+            entry = self._list_cache.get(key)
+            if entry is None:
+                return None
+            stored_at, data = entry
+            if time.monotonic() - stored_at > max_age_seconds:
+                return None
+            return data
 
     def _invalidate_list_cache(self, key: str) -> None:
         with self._list_cache_lock:

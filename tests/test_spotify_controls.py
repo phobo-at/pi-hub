@@ -12,7 +12,12 @@ from smart_display.providers.spotify_provider import (
     build_spotify_state_from_payload,
     map_spotify_devices,
     map_spotify_playlists,
+    map_spotify_queue,
     spotify_status_message,
+)
+from smart_display.providers.spotify_provider import (
+    _QUEUE_CACHE_TTL_SECONDS,
+    _QUEUE_STALE_MAX_AGE_SECONDS,
 )
 from tests._support import FakeHttpClient, make_app_config, make_state_store
 
@@ -22,6 +27,9 @@ def _json_body(call) -> dict:
 
     return json.loads((call.body or b"").decode("utf-8"))
 
+
+# refresh() opts into episodes so podcasts are not reported as `item: null`.
+PLAYER_STATE_URL = "https://api.spotify.com/v1/me/player?additional_types=episode"
 
 PLAYING_PAYLOAD = {
     "is_playing": True,
@@ -34,6 +42,7 @@ PLAYING_PAYLOAD = {
     },
     "item": {
         "name": "Everything In Its Right Place",
+        "duration_ms": 251_000,
         "artists": [{"name": "Radiohead"}],
         "album": {"name": "Kid A", "images": [{"url": "https://example.com/kida.jpg"}]},
     },
@@ -154,6 +163,27 @@ class SpotifyStateTest(unittest.TestCase):
         self.assertIsNone(state.progress_ms)
         self.assertIsNone(state.duration_ms)
 
+    def test_episode_uses_show_metadata_and_artwork(self) -> None:
+        payload = {
+            "is_playing": True,
+            "device": {"name": "Wohnzimmer", "type": "Speaker", "is_restricted": False},
+            "item": {
+                "type": "episode",
+                "name": "Folge 7",
+                "duration_ms": 1_800_000,
+                "show": {"name": "Mein Podcast"},
+                "images": [
+                    {"url": "large.jpg"},
+                    {"url": "medium.jpg"},
+                ],
+            },
+        }
+        state = build_spotify_state_from_payload(payload, ProviderSnapshot(status="ok"))
+        self.assertEqual(state.track_title, "Folge 7")
+        self.assertEqual(state.artist_name, "Mein Podcast")
+        self.assertEqual(state.album_name, "Mein Podcast")
+        self.assertEqual(state.album_art_url, "medium.jpg")
+
 
 class SpotifyControlFlowTest(unittest.TestCase):
     """Covers the A1 release-blocker: control commands must reflect fresh
@@ -175,7 +205,7 @@ class SpotifyControlFlowTest(unittest.TestCase):
         # Command endpoint → 204, inline refresh → paused payload.
         self.fake.add_response("PUT", "https://api.spotify.com/v1/me/player/pause", status=204)
         self.fake.add_response(
-            "GET", "https://api.spotify.com/v1/me/player", status=200, body=PAUSED_PAYLOAD
+            "GET", PLAYER_STATE_URL, status=200, body=PAUSED_PAYLOAD
         )
 
         result = self.provider.toggle_playback()
@@ -186,7 +216,7 @@ class SpotifyControlFlowTest(unittest.TestCase):
         self.assertEqual(result["state"]["snapshot"]["status"], "ok")
         # Exactly one command + one refresh call — no extra round-trips.
         self.assertEqual(len(self.fake.calls_matching("PUT", "https://api.spotify.com/v1/me/player/pause")), 1)
-        self.assertEqual(len(self.fake.calls_matching("GET", "https://api.spotify.com/v1/me/player")), 1)
+        self.assertEqual(len(self.fake.calls_matching("GET", PLAYER_STATE_URL)), 1)
 
     def test_toggle_propagates_error_message_on_401(self) -> None:
         self.fake.add_response(
@@ -241,7 +271,7 @@ class SpotifyControlFlowTest(unittest.TestCase):
         }
         self.fake.add_response(
             "GET",
-            "https://api.spotify.com/v1/me/player",
+            PLAYER_STATE_URL,
             status=200,
             body=updated_payload,
         )
@@ -252,8 +282,64 @@ class SpotifyControlFlowTest(unittest.TestCase):
         self.assertEqual(result["state"]["volume_percent"], 55)
         # Refresh fired exactly once — the UI does not need to poll again.
         self.assertEqual(
-            len(self.fake.calls_matching("GET", "https://api.spotify.com/v1/me/player")), 1
+            len(self.fake.calls_matching("GET", PLAYER_STATE_URL)), 1
         )
+
+    def test_seek_command_refreshes_inline(self) -> None:
+        self.fake.add_response(
+            "PUT",
+            "https://api.spotify.com/v1/me/player/seek?position_ms=42000",
+            status=204,
+        )
+        updated_payload = {**PLAYING_PAYLOAD, "progress_ms": 42_000}
+        self.fake.add_response(
+            "GET",
+            PLAYER_STATE_URL,
+            status=200,
+            body=updated_payload,
+        )
+
+        result = self.provider.seek_to(42_000)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"]["progress_ms"], 42_000)
+
+    def test_seek_rejects_position_outside_current_item(self) -> None:
+        for position in (-1, 251_001, None, 3.2, True):
+            with self.subTest(position=position):
+                result = self.provider.seek_to(position)
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["message"], "Wiedergabeposition ist ungültig.")
+        self.assertEqual(self.fake.calls, [])
+
+    def test_seek_propagates_spotify_error(self) -> None:
+        self.fake.add_response(
+            "PUT",
+            "https://api.spotify.com/v1/me/player/seek?position_ms=42000",
+            status=403,
+        )
+        result = self.provider.seek_to(42_000)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["message"], "Spotify-Aktion nicht erlaubt.")
+
+    def test_seek_maps_rate_limit_and_network_failure(self) -> None:
+        self.fake.add_response(
+            "PUT",
+            "https://api.spotify.com/v1/me/player/seek?position_ms=42000",
+            status=429,
+        )
+        limited = self.provider.seek_to(42_000)
+        self.assertFalse(limited["ok"])
+        self.assertEqual(limited["message"], "Spotify-Limit erreicht. Kurz warten.")
+
+        self.fake.add_error(
+            "PUT",
+            "https://api.spotify.com/v1/me/player/seek?position_ms=43000",
+            HttpError("offline"),
+        )
+        offline = self.provider.seek_to(43_000)
+        self.assertFalse(offline["ok"])
+        self.assertEqual(offline["message"], "Spotify nicht erreichbar.")
 
     def test_next_track_returns_fresh_state(self) -> None:
         self.fake.add_response(
@@ -261,7 +347,7 @@ class SpotifyControlFlowTest(unittest.TestCase):
         )
         self.fake.add_response(
             "GET",
-            "https://api.spotify.com/v1/me/player",
+            PLAYER_STATE_URL,
             status=200,
             body=PLAYING_PAYLOAD,
         )
@@ -377,6 +463,49 @@ class SpotifyMapperTest(unittest.TestCase):
         # Playlist mosaics carry null widths — take the last (smallest) entry.
         self.assertEqual(map_spotify_playlists(raw)[0]["image_url"], "b.jpg")
 
+    def test_map_queue_supports_tracks_episodes_and_unknown_items(self) -> None:
+        raw = [
+            {
+                "type": "track",
+                "name": "Track",
+                "artists": [{"name": "Artist"}],
+                "album": {
+                    "images": [
+                        {"url": "large.jpg", "width": 640},
+                        {"url": "small.jpg", "width": 64},
+                    ]
+                },
+            },
+            {
+                "type": "episode",
+                "name": "Folge 7",
+                "show": {"name": "Mein Podcast"},
+                "images": [{"url": "episode.jpg", "width": 300}],
+            },
+            {"type": "ad", "name": "Spotify Hinweis"},
+            "garbage",
+        ]
+
+        items = map_spotify_queue(raw)
+
+        self.assertEqual(len(items), 3)
+        self.assertEqual(items[0], {
+            "title": "Track",
+            "subtitle": "Artist",
+            "image_url": "small.jpg",
+            "kind": "track",
+        })
+        self.assertEqual(items[1]["subtitle"], "Mein Podcast")
+        self.assertEqual(items[1]["kind"], "episode")
+        self.assertEqual(items[2]["subtitle"], "Spotify")
+
+    def test_map_queue_limits_result_to_four_rows(self) -> None:
+        raw = [
+            {"type": "track", "name": f"Track {index}", "artists": []}
+            for index in range(8)
+        ]
+        self.assertEqual(len(map_spotify_queue(raw)), 4)
+
 
 class SpotifyDeviceListTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -437,6 +566,160 @@ class SpotifyDeviceListTest(unittest.TestCase):
             self.assertEqual(result["devices"], [])
 
 
+class SpotifyQueueTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.provider, self.fake = _configured_provider(Path(self._tmp.name))
+
+    def _age_queue_cache(self, seconds: float) -> None:
+        """Backdate the cached queue entry relative to the monotonic clock."""
+        stored_at, data = self.provider._list_cache["queue"]
+        self.provider._list_cache["queue"] = (stored_at - seconds, data)
+
+    def _seed_queue(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=200,
+            body={
+                "queue": [
+                    {
+                        "type": "track",
+                        "name": "Nächster Titel",
+                        "artists": [{"name": "Künstler"}],
+                        "album": {"images": []},
+                    }
+                ]
+            },
+        )
+
+    def test_list_queue_maps_and_caches(self) -> None:
+        self._seed_queue()
+
+        first = self.provider.list_queue()
+        second = self.provider.list_queue()
+
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(first["items"][0]["title"], "Nächster Titel")
+        self.assertEqual(second["items"], first["items"])
+        self.assertEqual(
+            len(self.fake.calls_matching("GET", "https://api.spotify.com/v1/me/player/queue")),
+            1,
+        )
+
+    def test_expired_queue_falls_back_to_last_good_on_error(self) -> None:
+        self._seed_queue()
+        self.provider.list_queue()
+        # Age the entry past the TTL but inside the stale window. Relative to
+        # time.monotonic(), not a literal 0.0 — that is uptime-dependent and
+        # would still look fresh on a Pi in its first seconds after boot.
+        self._age_queue_cache(_QUEUE_CACHE_TTL_SECONDS + 1)
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=429,
+        )
+
+        stale = self.provider.list_queue()
+
+        self.assertTrue(stale["ok"])
+        self.assertEqual(stale["status"], "stale")
+        # Compare against an independently built expectation: asserting against
+        # the first call's list would compare the cached object with itself.
+        self.assertEqual(
+            stale["items"],
+            [
+                {
+                    "title": "Nächster Titel",
+                    "subtitle": "Künstler",
+                    "image_url": None,
+                    "kind": "track",
+                }
+            ],
+        )
+
+    def test_queue_stale_fallback_expires(self) -> None:
+        self._seed_queue()
+        self.provider.list_queue()
+        self._age_queue_cache(_QUEUE_STALE_MAX_AGE_SECONDS + 1)
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=429,
+        )
+
+        result = self.provider.list_queue()
+
+        # Past the stale window an honest error beats an hours-old queue.
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["items"], [])
+
+    def test_empty_queue_is_not_resurrected_as_stale(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=200,
+            body={"queue": []},
+        )
+        self.provider.list_queue()
+        self._age_queue_cache(_QUEUE_CACHE_TTL_SECONDS + 1)
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=429,
+        )
+
+        result = self.provider.list_queue()
+
+        # A cached empty list is a real answer, not last-known-good data — the
+        # calm empty-state message must win over the "loaded from cache" status.
+        self.assertEqual(result["status"], "empty")
+        self.assertEqual(result["message"], "Keine weiteren Titel.")
+        self.assertEqual(result["items"], [])
+
+    def test_queue_error_without_cache_is_isolated(self) -> None:
+        self.fake.add_error(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            HttpError("offline"),
+        )
+        result = self.provider.list_queue()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["items"], [])
+
+    def test_empty_queue_has_deliberate_state(self) -> None:
+        self.fake.add_response(
+            "GET",
+            "https://api.spotify.com/v1/me/player/queue",
+            status=200,
+            body={"queue": []},
+        )
+        result = self.provider.list_queue()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "empty")
+        self.assertEqual(result["message"], "Keine weiteren Titel.")
+
+    def test_successful_skip_invalidates_queue_cache(self) -> None:
+        self.provider._list_cache_set(
+            "queue",
+            [{"title": "Alt", "subtitle": "Artist", "image_url": None, "kind": "track"}],
+        )
+        self.fake.add_response(
+            "POST", "https://api.spotify.com/v1/me/player/next", status=204
+        )
+        self.fake.add_response(
+            "GET", PLAYER_STATE_URL, status=200, body=PLAYING_PAYLOAD
+        )
+
+        result = self.provider.next_track()
+
+        self.assertTrue(result["ok"])
+        self.assertNotIn("queue", self.provider._list_cache)
+
+
 class SpotifyStartPlaybackTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -451,7 +734,7 @@ class SpotifyStartPlaybackTest(unittest.TestCase):
             status=204,
         )
         self.fake.add_response(
-            "GET", "https://api.spotify.com/v1/me/player", status=200, body=PLAYING_PAYLOAD
+            "GET", PLAYER_STATE_URL, status=200, body=PLAYING_PAYLOAD
         )
 
     def test_start_playback_transfers_then_plays_context(self) -> None:
@@ -486,7 +769,7 @@ class SpotifyStartPlaybackTest(unittest.TestCase):
             "PUT", "https://api.spotify.com/v1/me/player/play?device_id=box-1", status=204
         )
         self.fake.add_response(
-            "GET", "https://api.spotify.com/v1/me/player", status=200, body=PLAYING_PAYLOAD
+            "GET", PLAYER_STATE_URL, status=200, body=PLAYING_PAYLOAD
         )
 
         result = self.provider.start_playback("box-1", "spotify:playlist:42")

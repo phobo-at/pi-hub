@@ -230,7 +230,14 @@ def serve_app(app: Flask) -> None:
             f"refusing to serve Smart Display on non-loopback host {host!r}; "
             "set app.host to 127.0.0.1, ::1 or localhost"
         )
-    serve(app, host=host, port=config.app.port)
+    # Keep Waitress' four-worker default. Two is not enough: opening the picker
+    # fires /api/spotify/devices and /api/spotify/sources concurrently, and both
+    # block on the shared api.spotify.com connection lock for up to
+    # spotify.timeout_seconds (x2 with the retry) — that would pin every worker
+    # and stall the /api/state poll and the screensaver media route with it.
+    # The saving was illusory anyway: extra worker threads reserve virtual stack,
+    # not resident memory, so this costs the 512 MB Pi effectively nothing.
+    serve(app, host=host, port=config.app.port, threads=4)
 
 
 def _configure_logging(config: AppConfig) -> None:

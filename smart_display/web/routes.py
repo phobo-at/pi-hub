@@ -162,6 +162,25 @@ def create_blueprint() -> Blueprint:
             return jsonify({"ok": False, "message": "volume_percent fehlt oder ist ungültig."}), 400
         return jsonify(services["spotify_provider"].set_volume(volume_percent))
 
+    @blueprint.post("/api/spotify/seek")
+    @local_only
+    def spotify_seek():
+        services = current_app.extensions["smart_display"]
+        payload = request.get_json(silent=True) or {}
+        position_ms = payload.get("position_ms")
+        if type(position_ms) is not int or position_ms < 0:
+            return jsonify(
+                {"ok": False, "message": "position_ms fehlt oder ist ungültig."}
+            ), 400
+        return jsonify(services["spotify_provider"].seek_to(position_ms))
+
+    @blueprint.get("/api/spotify/queue")
+    @local_only
+    def spotify_queue():
+        """Short upcoming queue for the detail screen, fetched only on demand."""
+        services = current_app.extensions["smart_display"]
+        return jsonify(services["spotify_provider"].list_queue())
+
     @blueprint.get("/api/spotify/devices")
     @local_only
     def spotify_devices():

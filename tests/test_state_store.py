@@ -35,6 +35,61 @@ def _make_store(temp_dir: str) -> StateStore:
 
 
 class StateStoreTest(unittest.TestCase):
+    def test_to_dict_returns_detached_payload(self) -> None:
+        # to_dict() no longer round-trips through from_dict(), so the thing worth
+        # pinning is the NESTED containers: a shared forecast/section list would
+        # hand /api/state callers a live alias into store state. A depth-2 scalar
+        # cannot catch that — every to_dict() rebuilds its own dict literal.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = _make_store(temp_dir)
+            store.update_section(
+                "weather",
+                WeatherState(
+                    snapshot=ProviderSnapshot(status="ok"),
+                    location_label="Linz",
+                    forecast=[
+                        WeatherForecastItem(
+                            day_label="Morgen",
+                            condition="Sonnig",
+                            temperature_max_c=20.0,
+                            temperature_min_c=10.0,
+                        )
+                    ],
+                ),
+            )
+            store.update_section(
+                "calendar",
+                CalendarState(
+                    snapshot=ProviderSnapshot(status="ok"),
+                    sections=[
+                        CalendarDaySection(
+                            day_key="today",
+                            section_date=date.today().isoformat(),
+                            items=[
+                                CalendarEventItem(
+                                    title="Termin",
+                                    starts_at="2026-07-18T09:00:00+02:00",
+                                    ends_at=None,
+                                    time_label="09:00",
+                                )
+                            ],
+                        )
+                    ],
+                ),
+            )
+
+            payload = store.to_dict()
+            payload["weather"]["location_label"] = "Manipuliert"
+            payload["weather"]["forecast"].append({"day_label": "Eingeschmuggelt"})
+            payload["weather"]["forecast"][0]["day_label"] = "Manipuliert"
+            payload["calendar"]["sections"][0]["items"].clear()
+
+            fresh = store.to_dict()
+            self.assertEqual(fresh["weather"]["location_label"], "Linz")
+            self.assertEqual(len(fresh["weather"]["forecast"]), 1)
+            self.assertEqual(fresh["weather"]["forecast"][0]["day_label"], "Morgen")
+            self.assertEqual(len(fresh["calendar"]["sections"][0]["items"]), 1)
+
     def test_error_keeps_last_known_good_weather(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = _make_store(temp_dir)
@@ -311,4 +366,3 @@ class SchemaMismatchQuarantineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -51,6 +51,11 @@ launch_chromium() {
     --overscroll-history-navigation=0 \
     --touch-events=enabled \
     --check-for-update-interval=31536000 \
+    --no-first-run \
+    --disable-background-networking \
+    --disable-default-apps \
+    --disable-extensions \
+    --disable-notifications \
     --disable-sync \
     --disable-component-update \
     --disable-domain-reliability \

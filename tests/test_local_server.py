@@ -137,6 +137,26 @@ class _StubSpotifyProvider:
         self.calls.append(f"volume:{percent}")
         return {"ok": True, "state": None}
 
+    def seek_to(self, position_ms: int) -> dict:
+        self.calls.append(f"seek:{position_ms}")
+        return {"ok": True, "state": None}
+
+    def list_queue(self) -> dict:
+        self.calls.append("queue")
+        return {"ok": True, "status": "empty", "message": "ok", "items": []}
+
+    def list_devices(self) -> dict:
+        self.calls.append("devices")
+        return {"ok": True, "message": "ok", "devices": []}
+
+    def list_playlists(self) -> dict:
+        self.calls.append("playlists")
+        return {"ok": True, "message": "ok", "playlists": []}
+
+    def start_playback(self, device_id: str, context_uri: str | None = None) -> dict:
+        self.calls.append(f"play:{device_id}:{context_uri}")
+        return {"ok": True, "state": None}
+
 
 class LoopbackOnlyPostsTest(unittest.TestCase):
     """Plan B10: POST endpoints must only accept loopback callers. The
@@ -241,6 +261,76 @@ class LoopbackOnlyPostsTest(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.spotify.calls, [])
 
+    def test_spotify_seek_accepts_integer(self) -> None:
+        response = self._post("/api/spotify/seek", json={"position_ms": 42_000})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.spotify.calls, ["seek:42000"])
+
+    def test_spotify_seek_rejects_invalid_payloads(self) -> None:
+        for payload in ({}, {"position_ms": None}, {"position_ms": -1}, {"position_ms": 3.2}, {"position_ms": True}):
+            with self.subTest(payload=payload):
+                response = self._post("/api/spotify/seek", json=payload)
+                self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.spotify.calls, [])
+
+    def test_spotify_seek_guarded(self) -> None:
+        response = self._post(
+            "/api/spotify/seek",
+            json={"position_ms": 42_000},
+            remote="10.0.0.4",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.spotify.calls, [])
+
+    def test_spotify_queue_is_local_only(self) -> None:
+        accepted = self.client.get(
+            "/api/spotify/queue",
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(self.spotify.calls, ["queue"])
+
+        rejected = self.client.get(
+            "/api/spotify/queue",
+            environ_overrides={"REMOTE_ADDR": "10.0.0.4"},
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(self.spotify.calls, ["queue"])
+
+    def test_spotify_play_is_local_only(self) -> None:
+        # start_playback can move audio to any speaker in the flat — it is the
+        # most abusable write on the blueprint, so pin its guard explicitly.
+        rejected = self._post(
+            "/api/spotify/play",
+            json={"device_id": "box-1"},
+            remote="10.0.0.4",
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(self.spotify.calls, [])
+
+        accepted = self._post("/api/spotify/play", json={"device_id": "box-1"})
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(self.spotify.calls, ["play:box-1:None"])
+
+    def test_spotify_list_endpoints_are_local_only(self) -> None:
+        for path, expected in (
+            ("/api/spotify/devices", "devices"),
+            ("/api/spotify/sources", "playlists"),
+        ):
+            with self.subTest(path=path):
+                self.spotify.calls.clear()
+                rejected = self.client.get(
+                    path, environ_overrides={"REMOTE_ADDR": "10.0.0.4"}
+                )
+                self.assertEqual(rejected.status_code, 403)
+                self.assertEqual(self.spotify.calls, [])
+
+                accepted = self.client.get(
+                    path, environ_overrides={"REMOTE_ADDR": "127.0.0.1"}
+                )
+                self.assertEqual(accepted.status_code, 200)
+                self.assertEqual(self.spotify.calls, [expected])
+
     def test_get_state_unaffected_by_guard(self) -> None:
         # GETs are not guarded at the decorator level — Waitress is already
         # pinned to loopback and the kiosk needs to read state.
@@ -260,8 +350,10 @@ class _FakeWaitressModule(types.ModuleType):
         super().__init__("waitress")
         self.calls: list[dict] = []
 
-        def _serve(app, *, host, port):  # noqa: ANN001 - test stub
-            self.calls.append({"app": app, "host": host, "port": port})
+        def _serve(app, *, host, port, threads):  # noqa: ANN001 - test stub
+            self.calls.append(
+                {"app": app, "host": host, "port": port, "threads": threads}
+            )
 
         self.serve = _serve
 
@@ -294,6 +386,9 @@ class ServeAppLoopbackEnforcementTest(unittest.TestCase):
         serve_app(app)
         self.assertEqual(len(self._fake.calls), 1)
         self.assertEqual(self._fake.calls[0]["host"], "127.0.0.1")
+        # Enough headroom that two parallel Spotify proxy calls (the picker
+        # fires devices + sources together) cannot starve /api/state.
+        self.assertGreaterEqual(self._fake.calls[0]["threads"], 4)
 
     def test_serve_app_accepts_ipv6_loopback(self) -> None:
         app = self._make_app("::1")

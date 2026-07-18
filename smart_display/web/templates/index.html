@@ -11,6 +11,9 @@
       window.__SMART_DISPLAY__ = {{ {"config": ui_config, "state": initial_state}|tojson }};
     </script>
 
+    <div class="screen-stage" id="screen-stage" data-active-screen="home">
+      <!-- div, not section: <main> may only be nested in html/body/div/form. -->
+      <div class="display-screen display-screen--home is-active" id="screen-home" aria-hidden="false">
     <main class="dashboard-shell" id="dashboard-shell">
       <section class="hero-panel">
         <div class="hero-panel__inner">
@@ -191,6 +194,92 @@
         </article>
       </section>
     </main>
+      </div>
+
+      <!-- The dashboard owns the document's single <main>; this screen is a
+           peer view of the same app, so it stays a plain section. -->
+      <div class="display-screen display-screen--spotify" id="screen-spotify" aria-hidden="true">
+        <section class="spotify-detail" id="spotify-detail" aria-label="Spotify-Steuerung">
+          <section class="spotify-detail__visual card" aria-label="Aktuelle Wiedergabe">
+            <div class="spotify-detail__artwork" id="spotify-detail-artwork" role="img" aria-label="Albumcover"></div>
+            <div class="spotify-detail__visual-meta">
+              <div class="spotify-detail__device spotify-device-badge" id="spotify-detail-device-badge">
+                <span class="spotify-device-badge__icon" id="spotify-detail-device-icon" aria-hidden="true"></span>
+                <span id="spotify-detail-device">Kein aktives Gerät</span>
+              </div>
+              <span class="spotify-detail__volume-readout" id="spotify-detail-volume-readout"></span>
+            </div>
+          </section>
+
+          <section class="spotify-detail__control card">
+            <header class="spotify-detail__header">
+              <div>
+                <div class="spotify-detail__eyebrow">Spotify</div>
+                <h1 class="spotify-detail__heading">Wiedergabe</h1>
+              </div>
+              <div class="spotify-detail__header-actions">
+                <button type="button" class="pill-button is-hidden" id="spotify-detail-open-picker" aria-label="Musik auf Gerät starten">
+                  <span class="pill-button__icon" id="spotify-detail-open-picker-icon" aria-hidden="true"></span>
+                  <span class="pill-button__label">Musik wählen</span>
+                </button>
+                <span class="status-pill is-hidden" id="spotify-detail-status">Laden</span>
+              </div>
+            </header>
+
+            <div class="spotify-detail__copy">
+              <div class="spotify-detail__track" id="spotify-detail-track">Keine aktive Wiedergabe</div>
+              <div class="spotify-detail__artist" id="spotify-detail-artist">Spotify nicht verbunden.</div>
+              <div class="spotify-detail__album" id="spotify-detail-album"></div>
+            </div>
+
+            <div class="spotify-detail__seek" id="spotify-detail-progress">
+              <input type="range" min="0" max="0" step="1000" value="0" id="spotify-detail-seek" aria-label="Wiedergabeposition" disabled>
+              <div class="spotify-detail__seek-times">
+                <span id="spotify-detail-progress-elapsed">0:00</span>
+                <span id="spotify-detail-progress-total">0:00</span>
+              </div>
+            </div>
+
+            <div class="spotify-detail__controls">
+              <div class="spotify-actions spotify-detail__actions">
+                <button type="button" class="icon-button" id="spotify-detail-previous" aria-label="Vorheriger Titel">
+                  <span class="icon-button__icon" id="spotify-detail-previous-icon" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="icon-button icon-button--primary spotify-detail__toggle" id="spotify-detail-toggle" aria-label="Wiedergabe umschalten">
+                  <span class="icon-button__icon" id="spotify-detail-toggle-icon" aria-hidden="true"></span>
+                </button>
+                <button type="button" class="icon-button" id="spotify-detail-next" aria-label="Nächster Titel">
+                  <span class="icon-button__icon" id="spotify-detail-next-icon" aria-hidden="true"></span>
+                </button>
+              </div>
+              <label class="spotify-volume spotify-detail__volume" for="spotify-detail-volume">
+                <span class="spotify-volume__label">Lautstärke</span>
+                <input type="range" min="0" max="100" step="1" value="0" id="spotify-detail-volume">
+              </label>
+            </div>
+
+            <section class="spotify-detail__queue" aria-labelledby="spotify-detail-queue-title">
+              <header class="spotify-detail__queue-header">
+                <h2 id="spotify-detail-queue-title">Als Nächstes</h2>
+                <span class="spotify-detail__queue-status" id="spotify-detail-queue-status"></span>
+              </header>
+              <div class="spotify-detail__queue-list" id="spotify-detail-queue-list">
+                <p class="spotify-detail__queue-message">Warteschlange wird beim Öffnen geladen.</p>
+              </div>
+            </section>
+          </section>
+        </section>
+      </div>
+
+      <nav class="screen-pagination" aria-label="Bildschirm wechseln">
+        <button type="button" class="screen-pagination__button is-active" data-screen-target="home" aria-label="Zum Homescreen" aria-current="page">
+          <span aria-hidden="true"></span>
+        </button>
+        <button type="button" class="screen-pagination__button" data-screen-target="spotify" aria-label="Zur Spotify-Steuerung">
+          <span aria-hidden="true"></span>
+        </button>
+      </nav>
+    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 

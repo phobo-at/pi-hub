@@ -42,7 +42,8 @@ class DiskCache:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temp_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
+            # Machine-owned cache: compact JSON reduces periodic SD-card writes.
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
         temp_path.replace(self.path)
