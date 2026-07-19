@@ -11,6 +11,45 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-19
+
+### Geändert
+
+- Die UI ist auf **Inter** umgestellt (`fonts-inter`, neu in `install-pi.sh`),
+  mit Noto Sans Display als Fallback. Grund war kein Geschmack: Noto Sans Display
+  liefert nur Regular und Bold, also rendert jedes `font-weight` zwischen 500 und
+  700 als Fett. Die UI wirkte deshalb durchgehend klotzig, und „weniger fett" war
+  schlicht nicht einstellbar.
+- Gewichte gestaffelt: 700 nur noch bei Uhr und Temperatur, 600 für Überschriften
+  und mittelgroße Labels, 500 für kleinen Sekundärtext, 400 für Fließtext.
+  Überschriften haben jetzt ein explizites Gewicht — sie sind `<h1>`/`<h2>` und
+  liefen vorher auf den Browser-Default *bold*, ohne dass eine Deklaration im
+  Stylesheet darauf hingedeutet hätte.
+- Negatives Tracking nur noch oberhalb ~40 px. Bei 14–16 px zieht es auf diesem
+  Panel die Punzen zu.
+- Uhrzeiten, Temperatur, Vorschauwerte und die Lautstärkeanzeige laufen auf
+  Tabellenziffern, damit sich ändernde Werte das Layout nicht verschieben.
+- Termine sind luftiger: Zeilenabstand 6→10 px, Padding 9→13 px, Titel 16→18 px,
+  Uhrzeit 14→16 px. Das kostet auf 1024×600 einen Tag — bewusst, weil
+  Lesbarkeit aus 1–2 m auf diesem Panel die knappere Ressource ist.
+
+### Behoben
+
+- Bei Gleichstand kürzte `compute_row_budget` den **ersten** Abschnitt. Da
+  Abschnitte chronologisch kommen und bei einem Termin pro Tag alle gleich groß
+  sind, fiel damit ausgerechnet *heute* weg, während übermorgen stehen blieb.
+  Gekürzt wird jetzt von hinten.
+- `<button>` erbt die Dokumentschrift nicht, sondern fällt auf die UA-Schrift
+  zurück — auf dem Pi eine Familie mit nur Regular und Bold. Sämtliche
+  Picker-Buttons wären damit weiter fett gelaufen. Einmal global gesetzt statt
+  pro Button-Regel kompensiert.
+- Die Zeitspalte der Termine war mit 92 px zu schmal: `09:00–10:30` misst bei
+  16px/600 mit Tabellenziffern ~99 px und malte über den Spaltenrand hinaus in
+  den Abstand zum Titel. Jetzt 104 px.
+- `test_section_can_be_trimmed_to_zero_and_drops_label` kürzte nie etwas auf
+  null — die Fixture ergab immer `[1,1,1]` und die Assertions waren zu locker,
+  um das zu bemerken. Der Pfad ist jetzt tatsächlich abgedeckt.
+
 ## [0.6.0] - 2026-07-19
 
 ### Geändert

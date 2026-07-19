@@ -88,8 +88,9 @@ def compute_row_budget(
         max_rows: the total number of rows the list can physically show,
             counting label rows. Must be ≥ 0.
         section_has_label: whether each section consumes a dedicated label
-            row (``True`` for every day except the implicit "Heute"
-            section, which has no label).
+            row. In the shipping UI this is ``True`` for every section —
+            ``compute_day_label`` returns "Heute · <Wochentag>" for today too,
+            so today gets a header row like every other day.
 
     Returns:
         A list of allocated item counts, same length as the input. Sections
@@ -121,13 +122,18 @@ def compute_row_budget(
     # Greedy trim: repeatedly shave one item from the largest non-empty
     # section. For the inputs we see (≤ 3 sections, ≤ 30 items each) this is
     # effectively O(n²) on tiny n and simpler than a binary-search variant.
+    #
+    # `>=` breaks ties toward the LATEST section, which is what makes the result
+    # usable: sections arrive chronologically, so with one appointment per day
+    # (the common case) all sections tie, and picking the first would trim today
+    # — the day that matters most — while keeping the day after tomorrow.
     guard = sum(allocated) + 1
     while total_rows() > max_rows and guard > 0:
         guard -= 1
         largest_idx = -1
         largest_value = 0
         for i in range(n):
-            if allocated[i] > largest_value:
+            if allocated[i] > 0 and allocated[i] >= largest_value:
                 largest_value = allocated[i]
                 largest_idx = i
         if largest_idx < 0:

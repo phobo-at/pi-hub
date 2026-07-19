@@ -10,6 +10,16 @@ The full product brief — UI hierarchy, failure-mode rules, what NOT to regress
 
 User-facing strings are German and must use real umlauts.
 
+The UI is set in **Inter** (`fonts-inter`, installed by `scripts/install-pi.sh`),
+falling back to Noto Sans Display. That fallback is a downgrade, not an
+equivalent: Noto Sans Display ships only Regular and Bold, so every weight
+between 500 and 700 collapses to bold and the whole UI reads heavy. If the panel
+suddenly looks blunt, check that Inter is actually installed before touching any
+CSS. Weight scale: 700 only at display sizes (clock, temperature), 600 for
+headings and mid-size labels, 500 for small secondary text, 400 for body.
+Headings need an explicit `font-weight` — they are `<h1>`/`<h2>`, and the browser
+default is bold.
+
 ## Common commands
 
 ```bash

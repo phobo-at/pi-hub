@@ -101,6 +101,7 @@ apt-get install -y --no-install-recommends \
     "$CHROMIUM_PACKAGE" \
     "${OPTIONAL_KIOSK_PACKAGES[@]}" \
     fonts-noto-core \
+    fonts-inter \
     libopenjp2-7 \
     libtiff6 \
     libjpeg62-turbo

@@ -147,7 +147,7 @@ Manual steps (if you're not using the script):
 2. Install a minimal X11/kiosk stack:
 
 ```bash
-sudo apt install --no-install-recommends xserver-xorg xserver-xorg-legacy x11-xserver-utils xinit openbox chromium fonts-noto-core
+sudo apt install --no-install-recommends xserver-xorg xserver-xorg-legacy x11-xserver-utils xinit openbox chromium fonts-noto-core fonts-inter
 ```
 
 On current Raspberry Pi OS releases the Chromium package may be named `chromium`; the install script detects this automatically. For a manual install, use whichever of `chromium-browser` or `chromium` exists on your image.

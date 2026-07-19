@@ -51,16 +51,19 @@ class ComputeRowBudgetTest(unittest.TestCase):
         self.assertTrue(all(x > 0 for x in result))
 
     def test_section_can_be_trimmed_to_zero_and_drops_label(self) -> None:
-        # Huge first section forces later sections out completely.
+        # The old fixture ([20,5,3] over 5 rows) never actually trimmed anything
+        # to zero — it returned [1,1,1] and the assertions were loose enough not
+        # to notice, so this path was uncovered. A budget too small for one row
+        # plus one label per section does force sections out.
         result = compute_row_budget(
-            [20, 5, 3], 5, section_has_label=[False, True, True]
+            [6, 2, 1], 3, section_has_label=[True, True, True]
         )
-        # Sum counting labels for non-zero sections must be ≤ 5.
-        label_rows = sum(
-            1 for i, had in enumerate([False, True, True]) if had and result[i] > 0
-        )
-        self.assertLessEqual(sum(result) + label_rows, 5)
-        # Section 0 must still have most of the budget.
+        self.assertEqual(result, [1, 0, 0])
+        # Zeroed sections must stop costing a label row, or the result would not
+        # fit the budget it was computed against.
+        label_rows = sum(1 for count in result if count > 0)
+        self.assertLessEqual(sum(result) + label_rows, 3)
+        # Today survives — it is the last thing the trim gives up.
         self.assertGreaterEqual(result[0], 1)
 
     def test_no_later_section_is_dropped_before_trimming_largest(self) -> None:
@@ -78,6 +81,21 @@ class ComputeRowBudgetTest(unittest.TestCase):
             1 for i, had in enumerate([False, True, True]) if had and result[i] > 0
         )
         self.assertLessEqual(total, 7)
+
+    def test_tie_trims_the_latest_section_not_today(self) -> None:
+        # One appointment per day is the common case, so every section ties.
+        # Sections are chronological: trimming the first would drop *today* and
+        # keep the day after tomorrow, which is backwards.
+        result = compute_row_budget(
+            [1, 1, 1], 4, section_has_label=[True, True, True]
+        )
+        self.assertEqual(result, [1, 1, 0])
+
+    def test_tie_keeps_trimming_from_the_back(self) -> None:
+        result = compute_row_budget(
+            [1, 1, 1], 2, section_has_label=[True, True, True]
+        )
+        self.assertEqual(result, [1, 0, 0])
 
     def test_label_length_mismatch_raises(self) -> None:
         with self.assertRaises(ValueError):

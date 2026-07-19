@@ -1221,8 +1221,11 @@
       guard -= 1;
       let largestIdx = -1;
       let largestValue = 0;
+      // `>=` breaks ties toward the latest section — sections are
+      // chronological, so trimming the first would drop today and keep the day
+      // after tomorrow. Mirrors calendar_layout.compute_row_budget.
       for (let i = 0; i < n; i += 1) {
-        if (allocated[i] > largestValue) {
+        if (allocated[i] > 0 && allocated[i] >= largestValue) {
           largestValue = allocated[i];
           largestIdx = i;
         }

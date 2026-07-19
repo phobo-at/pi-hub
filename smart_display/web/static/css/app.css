@@ -22,6 +22,18 @@
   box-sizing: border-box;
 }
 
+/* Form controls do not inherit the document font — a <button> falls back to the
+   UA control font, which on the Pi resolves to a family that ships Regular and
+   Bold only. Every weight below 700 would snap back to bold inside buttons,
+   which is the whole problem the Inter switch exists to fix. Set it once here
+   rather than re-declaring the stack per button rule. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 html,
 body {
   margin: 0;
@@ -34,7 +46,13 @@ body {
     radial-gradient(circle at bottom right, rgba(173, 142, 109, 0.14), transparent 28%),
     linear-gradient(145deg, #0b0e12 0%, #11161d 45%, #171d24 100%);
   color: var(--text);
-  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
+  /* Inter (apt: fonts-inter) over Noto Sans Display for two reasons on this
+     panel: it ships real Medium/SemiBold cuts, and Noto Sans Display ships only
+     Regular and Bold — so every `font-weight: 600` here used to render as 700,
+     which is why the UI read as uniformly heavy. Second, its larger x-height and
+     open apertures survive the low pixel density at 1–2 m better than a display
+     face does. Noto stays as the fallback and still covers glyphs Inter lacks. */
+  font-family: "Inter", "Noto Sans Display", "Noto Sans", sans-serif;
   touch-action: manipulation;
 }
 
@@ -100,7 +118,7 @@ body {
   margin: 0 0 10px;
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -220,7 +238,6 @@ body[data-watch-face="analog"] .watch-face__analog {
   position: absolute;
   left: 0;
   right: 0;
-  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
   font-weight: 700;
   line-height: 1;
   text-align: center;
@@ -346,7 +363,6 @@ body[data-watch-face="analog"] .watch-face__analog {
   align-items: baseline;
   justify-content: center;
   gap: 4px;
-  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
   line-height: 0.94;
   letter-spacing: -0.05em;
 }
@@ -378,8 +394,7 @@ body[data-watch-face="analog"] .watch-face__analog {
   gap: 2px;
   margin-top: 4px;
   padding: 2px 0;
-  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.12em;
   line-height: 1;
   color: rgba(255, 255, 255, 0.16);
@@ -493,9 +508,8 @@ body[data-watch-face="analog"] .watch-face__analog {
   margin-top: 20px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
-  font-family: "Noto Sans Display", "Noto Sans", sans-serif;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.1;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -524,12 +538,15 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
   gap: 12px;
 }
 
-.hero-weather__title,
-.hero-weather__location {
+/* <h2>. Without an explicit weight the browser default (bold) wins, which is
+   what made the panel read heavy — there was no font-weight declaration to
+   notice. Same for every other heading in this file. */
+.hero-weather__title {
   margin: 0;
+  font-weight: 600;
   font-size: 24px;
   line-height: 1.05;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .hero-weather__body {
@@ -540,9 +557,10 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
 }
 
 .hero-weather__temperature {
+  font-variant-numeric: tabular-nums;
   font-size: 62px;
   line-height: 0.9;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: -0.05em;
 }
 
@@ -626,7 +644,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -639,19 +657,20 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 }
 
 .forecast-chip__temp {
+  font-variant-numeric: tabular-nums;
   display: flex;
   align-items: baseline;
   gap: 6px;
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .forecast-chip__temp-min {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .divider {
@@ -715,9 +734,10 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .card__title {
   margin: 0;
+  font-weight: 600;
   font-size: 28px;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .status-pill {
@@ -728,7 +748,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -771,7 +791,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 .calendar-section-label {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   padding: 2px 4px 0;
@@ -791,22 +811,24 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 .calendar-item__time {
   color: var(--accent);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
+  /* Tabular figures so the times form a clean column instead of shifting with
+     each digit's width — Inter's proportional 1 is markedly narrower. */
+  font-variant-numeric: tabular-nums;
   /* "09:00–10:30" must stay on one line: a wrapped time cell makes rows
      different heights, and renderCalendar's row budget assumes they are equal. */
   white-space: nowrap;
 }
 
-/* One line, ellipsised. Two-line titles double the row height, which at 1024x600
-   drops the budget to 4 rows — and the shave-the-largest-section rule then drops
-   *today* entirely. Three visible days beat full titles in a 1/3-wide column. */
+/* One line, ellipsised. Two-line titles double the row height and halve how many
+   appointments fit — not worth it in a 1/3-wide column. */
 .calendar-item__title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 21px;
   line-height: 1.15;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .calendar-empty {
@@ -897,8 +919,8 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   overflow: hidden;
   font-size: var(--tile-title);
   line-height: 1.15;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--accent-strong);
 }
 
@@ -991,7 +1013,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.05);
   color: var(--accent);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .spotify-device-badge__icon {
@@ -1064,7 +1086,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 .spotify-volume__label {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1204,8 +1226,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     padding-top: 20px;
   }
 
-  .hero-weather__title,
-  .hero-weather__location {
+  .hero-weather__title {
     font-size: 22px;
   }
 
@@ -1278,9 +1299,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     padding-top: 8px;
   }
 
-  /* 250px active keeps the calendar at 6 single-line rows — enough for all three
-     days. Raising it drops rows, and the "shave the largest section first" rule
-     then starts discarding today. Do not raise blindly; re-check the row count. */
+  /* 250px active leaves the calendar roughly four rows, i.e. today and tomorrow
+     at the roomier type below. Raising it drops rows; compute_row_budget trims
+     from the back, so what falls away is the last day, never today. */
   .cards-column {
     gap: 12px;
     --tile-h-idle: 96px;
@@ -1307,30 +1328,37 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     font-size: 10px;
   }
 
+  /* Air over completeness: bigger type and roomier rows read better at 1-2 m on
+     a panel this coarse, and the row budget drops from 6 to 4 as a result. The
+     trim order makes that acceptable — ties shave the latest section first, so
+     it is the day after tomorrow that falls away, never today. */
   .calendar-list {
-    gap: 6px;
+    gap: 10px;
   }
 
   .calendar-section-label {
-    font-size: 10px;
+    font-size: 11px;
     padding-top: 0;
   }
 
-  /* 86px is the floor for the time cell: "09:00–10:30" measures ~81px at
-     14px/700. Narrower and it wraps, which breaks the uniform row height. */
+  /* 104px is the floor for the time cell: "09:00–10:30" measures ~99px at
+     16px/600 with tabular figures — Inter's tabular cut is wider than its
+     proportional one, so those two changes push in opposite directions. Too
+     narrow and the text paints outside its track rather than wrapping (nowrap),
+     silently eating the gap to the title. */
   .calendar-item,
   .calendar-empty {
-    grid-template-columns: 86px 1fr;
-    gap: 8px;
-    padding: 9px 11px;
+    grid-template-columns: 104px 1fr;
+    gap: 12px;
+    padding: 13px 14px;
   }
 
   .calendar-item__time {
-    font-size: 14px;
+    font-size: 16px;
   }
 
   .calendar-item__title {
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .calendar-empty {
@@ -1539,7 +1567,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.01em;
   cursor: pointer;
   transition: background var(--transition), transform var(--transition);
@@ -1607,8 +1635,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .picker__title {
   margin: 0;
+  font-weight: 600;
   font-size: 26px;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .picker__close {
@@ -1655,7 +1684,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 .picker__section-title {
   margin: 0 0 10px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -1673,7 +1702,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1700,7 +1729,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
 }
@@ -1772,7 +1801,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .picker-playlist__name {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1929,7 +1958,11 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 14px;
-  font-weight: 700;
+  /* Matches .spotify-device-badge beside it in the same row. Tabular figures
+     because the value updates on every drag frame — proportional digits would
+     make the readout and the badge next to it reflow continuously. */
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .spotify-detail__control {
@@ -1949,16 +1982,17 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   margin-bottom: 2px;
   color: var(--muted);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .spotify-detail__heading {
   margin: 0;
+  font-weight: 600;
   font-size: 24px;
   line-height: 1;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .spotify-detail__copy {
@@ -1970,9 +2004,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   overflow: hidden;
   color: var(--accent-strong);
   font-size: clamp(25px, 3vw, 34px);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.05;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1982,7 +2016,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   margin-top: 5px;
   color: var(--accent);
   font-size: 17px;
-  font-weight: 600;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2019,7 +2053,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   margin-top: 6px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2058,15 +2092,16 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .spotify-detail__queue-header h2 {
   margin: 0;
+  font-weight: 600;
   font-size: 14px;
   line-height: 1;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .spotify-detail__queue-status {
   color: var(--warn);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -2118,7 +2153,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .spotify-detail__queue-title {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.15;
 }
 
