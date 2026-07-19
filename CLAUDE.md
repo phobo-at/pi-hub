@@ -43,7 +43,7 @@ python3 -m unittest tests.test_calendar_formatting.TestClass.test_method
 
 There is no linter or formatter wired up, and no `dev` extras installed — `pyproject.toml`'s `[project.optional-dependencies].dev` is empty. Don't introduce one without asking.
 
-When changing layout, typography, or any visible state, **also validate visually at 1024x600** — not just logically.
+When the diff touches `smart_display/web/static/css/`, `smart_display/web/templates/` or `smart_display/watch_faces.py`, **also validate visually at 1024x600** — not just logically. Diffs outside those paths don't need it. This is a development step, **not** a `/ship` gate: `scripts/take-screenshots.sh` drives headless Chrome while the device runs WebKit, so its output is never evidence about the panel. The pre-merge checks in `AGENTS.md` (`compileall` + `unittest`) are the only ship gates in this repo.
 
 ## Architecture
 
@@ -91,18 +91,74 @@ After a successful push, deploy to the Pi:
 bash scripts/deploy-pi.sh
 ```
 
-**Only when the diff touches code that runs on the device** — `smart_display/`,
-`config/`, `deploy/`, `scripts/`, or `pyproject.toml`. Skip it for a diff that is
-only docs, `CHANGELOG.md`, `docs/screenshots/`, or `tests/`: restarting the kiosk
-blanks a wall panel that is otherwise on 24/7, and nothing about those files
-reaches the device at runtime.
+**Immer** — bedingungslos, kein Ermessen anhand des Diffs, keine Rückfrage. Nicht
+überspringen, weil der Diff „nach Doku aussieht", und nicht gegen das 24/7-Panel
+abwägen: diese Entscheidung trifft `deploy-pi.sh` selbst und trifft sie besser.
+Es synct jedes Mal (Dateien schreiben ist für die laufenden Units unsichtbar) und
+startet die beiden systemd-Units **nur**, wenn rsync tatsächlich etwas übertragen
+hat. `docs/`, `tests/`, `.github/` und alle `*.md` sind aus dem rsync
+ausgeschlossen — ein reiner Doku-Ship überträgt null Dateien, druckt
+`Neustart übersprungen`, und das Panel bleibt an. Verifiziert gegen das Gerät:
+eine geänderte `README.md` und sechs geänderte `docs/screenshots/*.png` erzeugen
+zusammen keine einzige rsync-Zeile.
 
-`deploy-pi.sh` rsyncs the working tree to `/opt/smart-display` and restarts both
-units. It is *not* `install-pi.sh` — that one provisions a fresh machine (apt,
-venv, systemd units) and is the wrong tool for a code change. The rsync excludes
-everything the device owns and the repo cannot recreate: `.env`, `.kiosk.env`,
-`data/` (state cache + screensaver images), `.venv`, and the editable-install
-egg-info. Target host comes from `PI_HOST` (default `pi@192.168.178.22`).
+Diese Logik lebt im Skript. Hier nicht nachbauen, und keine Bedingung zurück in
+diesen Abschnitt schreiben — genau das war der alte Zustand, und er hing daran,
+dass ein Modell jedes Mal richtig rät. Bewusst übersteuern nur mit
+`--force-restart`, wenn das Gerät nachweislich driftet (etwa nach einem
+abgebrochenen Deploy).
+
+Das Gate ist absichtlich grob: rsync vergleicht Größe und mtime, keine Prüfsumme.
+Eine inhaltlich identische Datei mit neuerer mtime (Branch-Wechsel, `stash pop`)
+löst einen überflüssigen Neustart aus. Richtige Fehlerrichtung — lieber einmal zu
+viel neu starten als Code ausliefern und den Restart verschlucken.
+
+Exit-Codes: `0` = erledigt · `3` = Pi nicht erreichbar, es wurde nichts deployed.
+Bei `3` ist der Ship weder rot noch grün: der Push ist raus und wird **nicht**
+rückgängig gemacht, das Gerät läuft auf altem Stand. Genau so melden und auf
+`bash scripts/deploy-pi.sh` als Nachhol-Kommando verweisen. Jeder andere Exit ≠ 0
+ist ein **fehlgeschlagener Deploy** — den fehlgeschlagenen Schritt benennen, den
+Ship nicht als grün darstellen.
+
+`deploy-pi.sh` rsyncs the working tree to `/opt/smart-display` and restarts the
+two units **iff that rsync transferred something** (see above). It is *not*
+`install-pi.sh` — that one provisions a fresh machine (apt, venv, systemd units)
+and is the wrong tool for a code change. Target host comes from `PI_HOST`
+(default `pi@192.168.178.22`).
+
+Zwei Dinge, die `deploy-pi.sh` bewusst **nicht** kann, und die deshalb
+`install-pi.sh` brauchen:
+
+- **Geänderte systemd-Units.** `install-pi.sh` *kopiert* `deploy/systemd/*.service`
+  nach `/etc/systemd/system/` (kein Symlink). Der rsync erreicht nur
+  `/opt/smart-display/deploy/systemd/`, also wird eine Unit-Änderung zwar
+  übertragen und löst einen Restart aus, **wirkt aber nicht**. Das
+  `daemon-reload` im Skript ist reine Hygiene und ändert daran nichts.
+- **Neue Dependencies.** Es läuft kein `pip install -e .`. Ein geändertes
+  `pyproject.toml` landet als Datei auf dem Gerät, das venv kennt das Paket
+  nicht → Backend startet nicht → der Health-Loop läuft 30 s leer und das Skript
+  bricht ab.
+
+The rsync excludes two disjoint sets, and the distinction matters:
+
+- `RSYNC_OWNED` — what the device owns and the repo cannot recreate: `.env`,
+  `.kiosk.env`, `data/` (state cache + screensaver images), `.venv`, the
+  editable-install egg-info — plus local build/cache dirt (`.DS_Store`,
+  `.pytest_cache`, …), because rsync does not read `.gitignore` and a
+  Finder-written `.DS_Store` would otherwise trip the restart gate on every
+  ship. `install-pi.sh` carries a **deliberately shorter** list (it lays down a
+  full checkout, `.git` included), so the two are not meant to match line for
+  line — only the device-owned entries must never be dropped here.
+- `RSYNC_SKIP` — `docs/`, `tests/`, `.github/`, `*.md`: never read at runtime.
+  Excluding them is what makes the restart gate work. **Nicht** nach
+  `install-pi.sh` spiegeln (der Installer legt den Vollcheckout an). Falls hier je
+  etwas dazukommt, das doch aufs Gerät muss, gehört es aus der Liste raus — keine
+  Ausnahme einbauen.
+
+Nebeneffekt: `docs/`, `tests/` und `*.md`, die aus früheren Deploys auf dem Pi
+liegen, werden von `--delete` **nicht** entfernt (rsync schützt ausgeschlossene
+Pfade). Sie bleiben als tote Kopien liegen — folgenlos; bei Bedarf einmal
+`ssh $PI_HOST 'sudo rm -rf /opt/smart-display/{docs,tests}'`.
 
 The script reports version, both unit states, the kiosk restart count and
 `/health`. It **cannot** verify the panel visually — Cog renders straight to DRM,

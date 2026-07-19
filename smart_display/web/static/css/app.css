@@ -609,19 +609,15 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
   display: none;
 }
 
-/* The QLOCKTWO word-clock faces eat a square block of vertical space, so their
-   half of the hero is the busiest. Dropping the forecast to two days (Heute +
-   Morgen) is a visual-calm choice for those faces — it does NOT buy height, the
-   chip row is a single row either way. Reacts instantly to the touch face-cycle
-   via the existing body[data-watch-face] hook — no JS needed. The third chip
-   stays in the DOM (negligible) but is hidden. */
+/* The QLOCKTWO grids are square and therefore bound by the hero's height, not
+   its width — a wider column does nothing for them. Dropping the forecast row
+   is the only lever that actually buys them size, and on a word clock size is
+   legibility: it is read as text, not glanced at like hands on a dial. So these
+   two faces trade the outlook for a bigger grid and keep only the current
+   conditions. Reacts instantly to the touch face-cycle via the existing
+   body[data-watch-face] hook — no JS, the chips just stop being rendered. */
 body[data-watch-face="qlocktwo"] .hero-weather__forecast,
 body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-body[data-watch-face="qlocktwo"] .forecast-chip:nth-child(n + 3),
-body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   display: none;
 }
 
@@ -697,7 +693,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   display: grid;
   gap: 16px;
   min-height: 0;
-  --tile-h-idle: 108px;
+  --tile-h-idle: 200px;
   --tile-h-active: 280px;
   --tile-title-idle: 20px;
   --tile-title-active: 22px;
@@ -970,8 +966,10 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   top: 0;
   bottom: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   justify-content: center;
+  gap: 12px;
 }
 
 .cards-column:not(.is-spotify-active) .spotify-tile__artist {
@@ -986,9 +984,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
    never drift apart. Filled once at bind time, never per render. */
 .spotify-tile__play {
   display: none;
+  flex: 0 0 auto;
   width: 22px;
   height: 22px;
-  margin-bottom: 10px;
   color: var(--accent-strong);
 }
 
@@ -1189,29 +1187,32 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     width: min(100%, 580px);
   }
 
-  /* QLOCKTWO is aspect-ratio 1/1, so it is bound by the hero's height, not its
-     width — the wider column cannot help it. It used to overflow by ~11px and got
-     clipped; 300px fits with the enlarged weather block below. Deliberately the
-     one face that does not grow. */
+  /* Cell pitch is width/11, so the letters scale with the grid: 355/11 ≈ 32px
+     per cell carries 26px glyphs with the tracking below. */
   .qlocktwo-letter {
-    font-size: clamp(16px, 2.2vw, 22px);
+    font-size: clamp(16px, 2.6vw, 26px);
     letter-spacing: 0.06em;
   }
 
+  /* Sized against the height the dropped forecast row frees up, not the column
+     width — the grid is square. Re-measure if the weather block changes. */
   .watch-face__qlocktwo,
   .watch-face__qlocktwo-ooe {
     gap: 1px;
     margin-top: 2px;
-    width: min(100%, 300px);
+    width: min(100%, 355px);
   }
 
   .qlocktwo-row {
     gap: 1px;
   }
 
+  /* Square, so height-bound like the QLOCKTWO grids — the wider column does
+     nothing for it. The extra room comes from the tightened weather block
+     below, not from the column. */
   .analog-clock {
-    width: clamp(150px, 24vw, 245px);
-    height: clamp(150px, 24vw, 245px);
+    width: clamp(150px, 28vw, 287px);
+    height: clamp(150px, 28vw, 287px);
   }
 
   .hero-date {
@@ -1285,18 +1286,26 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     font-size: 14px;
   }
 
-  /* The QLOCKTWO faces are the tightest vertically — give their grid the height
-     the enlarged weather block would otherwise take. */
+  /* The square faces are the tightest vertically — give them the height the
+     enlarged weather block would otherwise take. */
   body[data-watch-face="qlocktwo"] .hero-weather,
-  body[data-watch-face="qlocktwo-ooe"] .hero-weather {
+  body[data-watch-face="qlocktwo-ooe"] .hero-weather,
+  body[data-watch-face="analog"] .hero-weather {
     margin-top: 14px;
     padding-top: 14px;
   }
 
   body[data-watch-face="qlocktwo"] .hero-date,
-  body[data-watch-face="qlocktwo-ooe"] .hero-date {
+  body[data-watch-face="qlocktwo-ooe"] .hero-date,
+  body[data-watch-face="analog"] .hero-date {
     margin-top: 8px;
     padding-top: 8px;
+  }
+
+  /* Tracks the grid width so the divider still lines up under it. */
+  body[data-watch-face="qlocktwo"] .hero-date,
+  body[data-watch-face="qlocktwo-ooe"] .hero-date {
+    width: min(100%, 355px);
   }
 
   /* 250px active leaves the calendar roughly four rows, i.e. today and tomorrow
@@ -1304,7 +1313,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
      from the back, so what falls away is the last day, never today. */
   .cards-column {
     gap: 12px;
-    --tile-h-idle: 96px;
+    --tile-h-idle: 180px;
     --tile-h-active: 250px;
     --tile-title-idle: 19px;
     --tile-title-active: 20px;

@@ -2,6 +2,9 @@
 .env
 .env.local
 *.env.local
+# Device-owned kiosk config (KIOSK_BROWSER etc.). Lives only on the Pi today,
+# but if a copy is ever made here, `git add -A` would commit it.
+.kiosk.env
 
 # Runtime data — populated by the app, must not be committed
 data/

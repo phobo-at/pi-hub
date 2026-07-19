@@ -11,6 +11,31 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-19
+
+### Geändert
+
+- Die QLOCKTWO-Faces tauschen die Wettervorschau gegen Rastergröße: 300 → 355 px,
+  Buchstaben 22 → 26 px, es bleibt der aktuelle Wert. Das Raster ist quadratisch
+  und damit höhen-, nicht breitengebunden — die Chip-Reihe war die einzige Höhe,
+  die zu holen war. Eine Wortuhr wird gelesen, nicht wie Zeiger überflogen; dort
+  ist Größe unmittelbar Lesbarkeit.
+- Die Analoguhr wächst aus demselben Grund von 245 auf 287 px.
+- Die Spotify-Kachel im Leerlauf ist 180 statt 96 px hoch, mit dem Play-Glyph
+  neben statt über dem Label und zentriertem Inhalt. Sie ist ein beschrifteter
+  Knopf, kein leeres Feld — die flache Variante stammte noch aus der Zeit, als
+  dort „Keine aktive Wiedergabe“ stand. Nebeneffekt: Die Termine-Karte bekommt
+  nicht länger Fläche zugewiesen, die sie bei wenigen Terminen nicht füllen kann.
+- `scripts/deploy-pi.sh` startet die systemd-Units nur noch, wenn der rsync
+  tatsächlich etwas übertragen hat, und kennt `--force-restart`. Doku, Tests und
+  `*.md` sind vom Sync ausgeschlossen, ein reiner Doku-Ship lässt das Panel also
+  an. Exit-Code `3` bedeutet: Pi nicht erreichbar, nichts deployed.
+- `.kiosk.env` steht jetzt in `.gitignore`. Die Datei lebt nur auf dem Gerät,
+  aber eine Kopie im Repo würde `git add -A` mitnehmen.
+
+Alle sechs Watch-Faces auf 1024×600 gegen Clipping geprüft: 30 px Restluft bei
+der Analoguhr als knappstem Fall, bis 185 px bei `pulse`.
+
 ## [0.7.0] - 2026-07-19
 
 ### Geändert

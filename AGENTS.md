@@ -42,7 +42,7 @@ Die UI hat zwei Screens, gewechselt per horizontalem Wisch (rein client-seitig, 
 
 **Screen 1 — Homescreen (Standard).** Die Zielhierarchie ist:
 
-- links (2/3 der Breite): Uhrzeit, Datum, Wetter mit kompakter Vorschau (3 Tage; bei den platzhungrigen QLOCKTWO-Faces auf 2 Tage reduziert) — bewusst groß, das ist die Kernfunktion aus 1–2 m
+- links (2/3 der Breite): Uhrzeit, Datum, Wetter mit kompakter Vorschau (3 Tage) — bewusst groß, das ist die Kernfunktion aus 1–2 m
 - rechts (1/3): oben Termine, darunter die Spotify-Kachel
 
 Die Gewichtung war früher umgekehrt (Termine breit). Ein Termin besteht aus Uhrzeit und kurzem Titel und braucht die Breite nicht; die Uhr schon. Nicht zurückdrehen.
@@ -59,10 +59,10 @@ Wichtige aktuelle UI-Entscheidungen:
 - Die Termine sind bewusst **luftig statt vollständig**: größere Schrift und mehr Zeilenabstand schlagen einen zusätzlichen Tag, weil die Lesbarkeit aus 1–2 m auf diesem Panel die knappere Ressource ist. Auf 1024×600 bleiben dadurch rund vier Zeilen, also heute und morgen.
 - Gekürzt wird bei Gleichstand **von hinten** (`>=` in `compute_row_budget`). Abschnitte kommen chronologisch, und bei einem Termin pro Tag sind alle gleich groß — mit `>` fiele ausgerechnet *heute* weg und übermorgen bliebe stehen. Diese Regel nicht umdrehen.
 - Der Homescreen zeigt für Spotify nur noch Artwork (vollflächig, mit Scrim) plus einen Track-Fortschrittsbalken (client-seitig zwischen den Polls interpoliert). Transport, Lautstärke, Gerätewahl und die Zeitangaben liegen **ausschließlich** auf Screen 2. Die gesamte Kachel ist tippbar und öffnet Screen 2 — auch im Leerlauf, wo sie „Musik starten“ zeigt. Kein Status-Badge auf dem Homescreen; Fehler erscheinen als Text in der Artist-Zeile.
-- Bei laufender Session ist die Spotify-Kachel 250 px hoch (großes Artwork), im Leerlauf 96 px. Beide Grid-Zeilen sind fixe Werte bzw. `1fr` — **bewusst nicht inhaltsabhängig**, weil `renderCalendar` sein Zeilenbudget aus `clientHeight` einer bereits geleerten Liste zieht und eine `fit-content`-Zeile dabei kollabiert.
+- Bei laufender Session ist die Spotify-Kachel 250 px hoch (großes Artwork), im Leerlauf 180 px — dort ist sie ein beschrifteter Knopf („Musik starten“) und kein leeres Feld, deshalb darf sie Fläche beanspruchen. Zu flach ließ sie außerdem der Termine-Karte Platz, den diese bei wenigen Terminen nicht füllen kann. Beide Grid-Zeilen sind fixe Werte bzw. `1fr` — **bewusst nicht inhaltsabhängig**, weil `renderCalendar` sein Zeilenbudget aus `clientHeight` einer bereits geleerten Liste zieht und eine `fit-content`-Zeile dabei kollabiert.
 - Zustand der rechten Spalte läuft über vererbte Custom Properties (`--tile-h`, `--tile-title`) auf `.cards-column`, Größen über die Kiosk-Media-Query. Nicht mischen: Zustands- und Größenregel auf derselben Eigenschaft bei unterschiedlicher Spezifität war die Ursache des alten 150-px-vs-84-px-Artwork-Bugs.
 - Die Hero-Uhr ist per Touch umschaltbar zwischen `flip` (Standard), `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe` und `analog`. Start-Face kommt aus `app.watch_face` bzw. `APP_WATCH_FACE`, die Nutzerwahl persistiert im `localStorage` — kein Server-Roundtrip.
-- Die QLOCKTWO-Faces wachsen bewusst **nicht** mit der breiteren Spalte: Ihr Raster ist `aspect-ratio: 1/1` und damit höhen-, nicht breitengebunden. Der 300-px-Deckel behebt ein vorher bestehendes Clipping.
+- Die QLOCKTWO-Faces und die Analoguhr sind quadratisch und damit höhen-, nicht breitengebunden — eine breitere Spalte bringt ihnen nichts. Bei den Wortuhren entfällt deshalb die Wettervorschau komplett zugunsten eines größeren Rasters (355 px): Eine Wortuhr wird *gelesen*, nicht wie Zeiger überflogen, dort ist Größe direkt Lesbarkeit. Es bleibt der aktuelle Wert. Wer das Wetterfeld anfasst, muss den Rasterdeckel neu ausmessen.
 
 Diese Entscheidungen nicht versehentlich zurückbauen.
 

@@ -104,16 +104,22 @@ Key settings:
 ### Updating a Pi that already runs it
 
 ```bash
-bash scripts/deploy-pi.sh              # sync + restart both units + health check
-bash scripts/deploy-pi.sh --dry-run    # preview what would change
+bash scripts/deploy-pi.sh                  # sync; restart only if something changed
+bash scripts/deploy-pi.sh --dry-run        # preview what would change
+bash scripts/deploy-pi.sh --force-restart  # restart even if nothing changed
 ```
 
 Syncs the working tree to `/opt/smart-display` and restarts the backend and the
-kiosk. Credentials (`.env`, `.kiosk.env`), the state cache and screensaver images
-(`data/`) and the venv stay untouched. Set `PI_HOST` to target a different device
-(default `pi@192.168.178.22`). Note that the panel cannot be screenshotted — Cog
-renders directly to DRM — so a green report confirms the services restarted, not
-that the UI looks right.
+kiosk **only if that sync actually transferred a file** — docs, tests and `*.md`
+are excluded from the sync, so a pure documentation ship leaves the panel
+running. Credentials (`.env`, `.kiosk.env`), the state cache and screensaver
+images (`data/`) and the venv stay untouched. Set `PI_HOST` to target a different
+device (default `pi@192.168.178.22`).
+
+Exit code `3` means the Pi was unreachable and nothing was deployed. Changed
+systemd units and new dependencies need `install-pi.sh`, not this script. Note
+that the panel cannot be screenshotted — Cog renders directly to DRM — so a green
+report confirms the services restarted, not that the UI looks right.
 
 ### First install
 
