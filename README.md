@@ -13,11 +13,11 @@ Six swappable hero clocks. Tap the hero clock to cycle through them; the choice 
 
 Regenerate the screenshots with `bash scripts/take-screenshots.sh` (headless Chrome against the local demo server, 1024×600).
 
-> The UI ships in German — this is a personal device. For reference: `Termine` = Calendar, `Wetter Zuhause` = Home Weather, `Spotify Wiedergabe` = Spotify Playback, `Berühren zum Aufwecken` = Touch to wake. The QLOCKTWO OÖ face is the Upper Austrian dialect variant of the classic word clock.
+> The UI ships in German — this is a personal device. For reference: `Termine` = Calendar, `Wetter Zuhause` = Home Weather, `Musik starten` = Start music, `Berühren zum Aufwecken` = Touch to wake. The QLOCKTWO OÖ face is the Upper Austrian dialect variant of the classic word clock.
 
 ## Spotify Screen
 
-Swipe left anywhere on the home screen to open the full Spotify controller — buttons and cards included, since a horizontal drag pages while a tap still activates whatever it landed on. The two sliders are the exception: they own the horizontal axis, so dragging one sets volume or position instead of paging. It adds a large now-playing view, scrubbing, shared transport/volume controls, the next four queue items, and the existing device/playlist picker. Swipe right to return home. There are deliberately no page indicators. The queue is fetched only while this screen is visible; the screensaver always resets the UI to the home screen.
+Swipe left anywhere on the home screen to open the full Spotify controller — buttons and cards included, since a horizontal drag pages while a tap still activates whatever it landed on. The two sliders are the exception: they own the horizontal axis, so dragging one sets volume or position instead of paging. Tapping the home screen's Spotify tile gets you there too, playing or idle. The controller owns every control: a large now-playing view, scrubbing, transport and volume, the next four queue items, and the device/playlist picker — the home tile itself shows only artwork, title and a progress bar. Swipe right to return home. There are deliberately no page indicators. The queue is fetched only while this screen is visible; the screensaver always resets the UI to the home screen.
 
 Release history lives in [CHANGELOG.md](CHANGELOG.md).
 

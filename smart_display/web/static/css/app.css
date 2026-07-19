@@ -46,7 +46,9 @@ body {
 .dashboard-shell {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  /* Uhr + Wetter sind die Kernfunktion aus 1–2 m, die Termine bestehen aus
+     Uhrzeit und kurzem Titel. Deshalb links 2/3, rechts 1/3 — nicht umgekehrt. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 18px;
   width: 100%;
   height: 100%;
@@ -57,6 +59,14 @@ body {
 .card {
   border: 1px solid var(--line);
   background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+/* Same chrome as a card, minus the background: .spotify-tile__art covers the
+   tile edge to edge in both states, so a panel background underneath it would
+   never paint. */
+.spotify-tile {
+  border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
 
@@ -160,7 +170,9 @@ body[data-watch-face="analog"] .watch-face__analog {
   gap: 8px;
   width: min(100%, 440px);
   margin: 0 auto;
-  perspective: 600px;
+  /* Scaled with the kiosk digit height — 600px over a 204px tall card made the
+     flip read as a fold rather than a rotation. */
+  perspective: 1100px;
 }
 
 .flip-digit {
@@ -491,9 +503,10 @@ body[data-watch-face="analog"] .watch-face__analog {
   color: rgba(255, 255, 255, 0.55);
 }
 
+/* Track the QLOCKTWO grid's width so the divider lines up under it. */
 body[data-watch-face="qlocktwo"] .hero-date,
 body[data-watch-face="qlocktwo-ooe"] .hero-date {
-  width: min(100%, 440px);
+  width: min(100%, 300px);
   margin-left: auto;
   margin-right: auto;
 }
@@ -578,11 +591,12 @@ body[data-watch-face="qlocktwo-ooe"] .hero-date {
   display: none;
 }
 
-/* The QLOCKTWO word-clock faces eat a square block of vertical space. To keep
-   the hero panel calm and unclipped on 1024x600, drop the forecast to two
-   days (Heute + Morgen) for those faces. Reacts instantly to the touch
-   face-cycle via the existing body[data-watch-face] hook — no JS needed.
-   The third chip stays in the DOM (negligible) but is hidden. */
+/* The QLOCKTWO word-clock faces eat a square block of vertical space, so their
+   half of the hero is the busiest. Dropping the forecast to two days (Heute +
+   Morgen) is a visual-calm choice for those faces — it does NOT buy height, the
+   chip row is a single row either way. Reacts instantly to the touch face-cycle
+   via the existing body[data-watch-face] hook — no JS needed. The third chip
+   stays in the DOM (negligible) but is hidden. */
 body[data-watch-face="qlocktwo"] .hero-weather__forecast,
 body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -647,39 +661,35 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: rgba(255, 255, 255, 0.16);
 }
 
+/* Both rows are deliberately NOT content-dependent: `renderCalendar` budgets its
+   visible rows from the live `clientHeight` of the calendar row, so a
+   `fit-content` row would collapse when the list is emptied and the budget would
+   silently render everything into an overflowing box. Both `--tile-h` variants
+   are plain lengths, so the calendar row always resolves from the container.
+   Anything that changes these numbers changes how many appointments are shown.
+
+   A breakpoint sets `--tile-h-idle` / `--tile-h-active`; the state selector below
+   only *picks* between them, once, at base specificity. That is what keeps it
+   honest: a media query cannot silently define one variant and leave the other
+   inherited from base — which is exactly the trap the old 150px-vs-84px artwork
+   bug fell into, since media queries add no specificity of their own.
+   JS toggles the class — no :has(), which the WPE/cog kiosk does not have. */
 .cards-column {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
   gap: 16px;
   min-height: 0;
+  --tile-h-idle: 108px;
+  --tile-h-active: 280px;
+  --tile-title-idle: 20px;
+  --tile-title-active: 22px;
+  --tile-h: var(--tile-h-idle);
+  --tile-title: var(--tile-title-idle);
+  grid-template-rows: minmax(0, 1fr) var(--tile-h);
 }
 
-/* When a controllable Spotify session is playing, the calendar shrinks to its
-   content (capped at 48% so a busy day still scrolls via the row budget) and
-   Spotify takes the rest — room for a big now-playing artwork. JS toggles the
-   class (no :has() so it works on both Chromium and the WPE/cog kiosk). Idle
-   falls back to the rule above: calendar fills, Spotify stays compact. */
 .cards-column.is-spotify-active {
-  grid-template-rows: fit-content(48%) minmax(0, 1fr);
-}
-
-.cards-column.is-spotify-active .spotify-card {
-  justify-content: center;
-}
-
-.cards-column.is-spotify-active .spotify-body {
-  grid-template-columns: 150px 1fr;
-  gap: 18px;
-}
-
-.cards-column.is-spotify-active .spotify-artwork {
-  width: 150px;
-  height: 150px;
-  border-radius: 22px;
-}
-
-.cards-column.is-spotify-active .spotify-track {
-  font-size: 24px;
+  --tile-h: var(--tile-h-active);
+  --tile-title: var(--tile-title-active);
 }
 
 .card {
@@ -691,8 +701,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   background: linear-gradient(180deg, rgba(26, 32, 41, 0.9), rgba(18, 22, 29, 0.92));
 }
 
-.calendar-card,
-.spotify-card {
+.calendar-card {
   min-height: 0;
 }
 
@@ -771,8 +780,8 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 .calendar-item,
 .calendar-empty {
   display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 12px;
+  grid-template-columns: 86px 1fr;
+  gap: 10px;
   align-items: start;
   padding: 14px 16px;
   border-radius: var(--radius-md);
@@ -783,9 +792,18 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   color: var(--accent);
   font-size: 18px;
   font-weight: 700;
+  /* "09:00–10:30" must stay on one line: a wrapped time cell makes rows
+     different heights, and renderCalendar's row budget assumes they are equal. */
+  white-space: nowrap;
 }
 
+/* One line, ellipsised. Two-line titles double the row height, which at 1024x600
+   drops the budget to 4 rows — and the shave-the-largest-section rule then drops
+   *today* entirely. Three visible days beat full titles in a 1/3-wide column. */
 .calendar-item__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 21px;
   line-height: 1.15;
   letter-spacing: -0.02em;
@@ -797,46 +815,169 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   font-size: 18px;
 }
 
-.spotify-body {
-  display: grid;
-  grid-template-columns: 88px 1fr;
-  gap: 16px;
-  align-items: center;
+/* The home Spotify tile. Full-bleed artwork with a scrim rather than a thumbnail
+   beside a caption: at 1–2 m the cover is the recognisable element, and a tile
+   that *is* a picture reads unambiguously as one pressable object — which is now
+   its whole job, since every control moved to the Spotify screen. */
+.spotify-tile {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  position: relative;
+  width: 100%;
   min-height: 0;
+  padding: 0;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.spotify-artwork {
-  width: 88px;
-  height: 88px;
-  border-radius: 20px;
+.spotify-tile:focus-visible {
+  outline: 2px solid rgba(216, 231, 255, 0.55);
+  outline-offset: 4px;
+}
+
+.spotify-tile:active {
+  transform: translateY(1px);
+}
+
+/* <button> is not a reliable containing block for absolutely positioned children
+   in older WebKit, and WPE is the engine the Pi ships. This span is. It
+   deliberately does not clip — .spotify-tile already does, and a second
+   identical rounded clip costs another mask on every tile repaint. */
+.spotify-tile__inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.spotify-tile__art {
+  position: absolute;
+  inset: 0;
+  display: block;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 50%),
-    linear-gradient(145deg, rgba(45, 55, 67, 0.9), rgba(18, 22, 29, 0.95));
+    radial-gradient(circle at 22% 18%, rgba(216, 231, 255, 0.14), transparent 36%),
+    linear-gradient(145deg, rgba(45, 55, 67, 0.92), rgba(18, 22, 29, 0.96));
   background-size: cover;
   background-position: center;
-  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.spotify-track {
-  font-size: 22px;
-  line-height: 1.1;
+/* Non-linear on purpose: white text has to hold up over a bright cover, and
+   backdrop-filter is too expensive on VideoCore to be an option here. */
+.spotify-tile__scrim {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: linear-gradient(
+    to top,
+    rgba(8, 10, 13, 0.94) 0%,
+    rgba(8, 10, 13, 0.8) 26%,
+    rgba(8, 10, 13, 0.3) 52%,
+    rgba(8, 10, 13, 0) 76%
+  );
+}
+
+.spotify-tile__meta {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 20px;
+  display: block;
+}
+
+.spotify-tile__track {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--tile-title);
+  line-height: 1.15;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--accent-strong);
 }
 
-.spotify-artist,
-.spotify-device {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 16px;
+.spotify-tile__artist {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
 }
 
-.spotify-device-row {
+/* Progress only — no times, no transport, no volume. All of that is one tap away
+   on the Spotify screen. */
+.spotify-tile__progress {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.cards-column.is-spotify-active .spotify-tile__progress {
+  display: block;
+}
+
+.spotify-tile__progress-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--accent-strong);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 1s linear;
+}
+
+/* Idle: no cover, so the fallback gradient shows. A centred label with a
+   CSS-drawn play glyph keeps it legible as a target without an extra node. */
+.cards-column:not(.is-spotify-active) .spotify-tile__scrim {
+  background: none;
+}
+
+.cards-column:not(.is-spotify-active) .spotify-tile__meta {
+  top: 0;
+  bottom: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.cards-column:not(.is-spotify-active) .spotify-tile__artist {
+  display: none;
+}
+
+.cards-column:not(.is-spotify-active) .spotify-tile__track {
+  -webkit-line-clamp: 1;
+}
+
+/* Idle only: the same play glyph the Spotify screen's toggle uses, so the two
+   never drift apart. Filled once at bind time, never per render. */
+.spotify-tile__play {
+  display: none;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 10px;
+  color: var(--accent-strong);
+}
+
+.cards-column:not(.is-spotify-active) .spotify-tile__play {
+  display: block;
+}
+
+.spotify-tile__play svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .spotify-device-badge {
@@ -867,64 +1008,10 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   white-space: nowrap;
 }
 
-.spotify-volume-readout {
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.spotify-progress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.spotify-progress__time {
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-}
-
-.spotify-progress__track {
-  flex: 1 1 auto;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  overflow: hidden;
-}
-
-.spotify-progress__fill {
-  height: 100%;
-  width: 100%;
-  border-radius: 999px;
-  background: var(--accent);
-  transform: scaleX(0);
-  transform-origin: left center;
-  /* Matches the 1 s interpolation tick so the bar glides instead of stepping. */
-  transition: transform 1s linear;
-}
-
-.spotify-card.is-inactive .spotify-progress {
-  display: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .spotify-progress__fill {
+  .spotify-tile__progress-fill {
     transition: none;
   }
-}
-
-.spotify-controls {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 18px;
-  /* Center the slider with the transport buttons — the slider is much shorter
-     than the round buttons, so `end` left it hugging the bottom edge. */
-  align-items: center;
-  margin-top: 14px;
 }
 
 .spotify-actions {
@@ -1010,37 +1097,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   opacity: 0.35;
 }
 
-.spotify-card.is-inactive .spotify-controls {
-  display: none;
-}
-
-.spotify-card.is-inactive .card__header {
-  margin-bottom: 12px;
-}
-
-.spotify-card.is-inactive .spotify-body {
-  grid-template-columns: 56px 1fr;
-  gap: 10px;
-}
-
-.spotify-card.is-inactive .spotify-artwork {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-}
-
-.spotify-card.is-inactive .spotify-track {
-  font-size: 18px;
-}
-
-.spotify-card.is-inactive .spotify-device-row {
-  margin-top: 6px;
-}
-
-.spotify-card.is-inactive .spotify-volume-readout {
-  display: none;
-}
-
 @media (max-width: 900px) {
   body {
     padding: 14px;
@@ -1055,15 +1111,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     min-height: 260px;
   }
 
-  .cards-column {
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .spotify-controls {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
   .spotify-actions {
     justify-content: space-between;
   }
@@ -1075,7 +1122,8 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   }
 
   .dashboard-shell {
-    grid-template-columns: minmax(0, 0.76fr) minmax(0, 1.24fr);
+    /* 1024 − 24 (body) − 12 (gap) = 988 → links 659 px, rechts 329 px. */
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
     gap: 12px;
   }
 
@@ -1089,30 +1137,42 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   }
 
   .flip-digit {
-    width: clamp(54px, 7.2vw, 72px);
-    height: clamp(82px, 11vw, 112px);
+    width: clamp(54px, 12.9vw, 132px);
+    height: clamp(82px, 20vw, 204px);
   }
 
   .flip-digit__digit {
-    font-size: clamp(68px, 9.4vw, 92px);
-    height: clamp(82px, 11vw, 112px);
+    font-size: clamp(68px, 16.3vw, 167px);
+    /* Must stay identical to .flip-digit's height or the halves desync. */
+    height: clamp(82px, 20vw, 204px);
   }
 
+  /* 4×132 digits + 4×8 gaps + 26 separator = 586px in the 605px hero box. The
+     vw factors are picked so each maximum lands at exactly 1024px (1vw=10.24px). */
   .flip-clock {
-    gap: 5px;
-    width: min(100%, 340px);
+    gap: 8px;
+    width: min(100%, 600px);
   }
 
   .flip-clock__sep {
-    gap: clamp(12px, 1.6vw, 18px);
+    gap: clamp(12px, 3vw, 30px);
+  }
+
+  .flip-clock__sep span {
+    width: clamp(8px, 1.8vw, 18px);
+    height: clamp(8px, 1.8vw, 18px);
   }
 
   .lcd-clock {
-    width: min(100%, 340px);
+    width: min(100%, 580px);
   }
 
+  /* QLOCKTWO is aspect-ratio 1/1, so it is bound by the hero's height, not its
+     width — the wider column cannot help it. It used to overflow by ~11px and got
+     clipped; 300px fits with the enlarged weather block below. Deliberately the
+     one face that does not grow. */
   .qlocktwo-letter {
-    font-size: clamp(16px, 2.4vw, 24px);
+    font-size: clamp(16px, 2.2vw, 22px);
     letter-spacing: 0.06em;
   }
 
@@ -1120,7 +1180,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   .watch-face__qlocktwo-ooe {
     gap: 1px;
     margin-top: 2px;
-    width: min(100%, 340px);
+    width: min(100%, 300px);
   }
 
   .qlocktwo-row {
@@ -1128,25 +1188,25 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   }
 
   .analog-clock {
-    width: clamp(150px, 19vw, 200px);
-    height: clamp(150px, 19vw, 200px);
+    width: clamp(150px, 24vw, 245px);
+    height: clamp(150px, 24vw, 245px);
   }
 
   .hero-date {
     margin-top: 12px;
-    padding-top: 10px;
-    font-size: 13px;
+    padding-top: 12px;
+    font-size: 16px;
     letter-spacing: 0.2em;
   }
 
   .hero-weather {
-    margin-top: 24px;
-    padding-top: 16px;
+    margin-top: 28px;
+    padding-top: 20px;
   }
 
   .hero-weather__title,
   .hero-weather__location {
-    font-size: 18px;
+    font-size: 22px;
   }
 
   .hero-weather__body {
@@ -1155,7 +1215,7 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   }
 
   .hero-weather__temperature {
-    font-size: 44px;
+    font-size: 64px;
   }
 
   .hero-weather__summary {
@@ -1163,50 +1223,70 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   }
 
   .hero-weather__icon {
-    width: 30px;
-    height: 30px;
+    width: 40px;
+    height: 40px;
   }
 
   .hero-weather__condition {
-    font-size: 15px;
+    font-size: 20px;
   }
 
   .hero-weather__secondary {
-    font-size: 12px;
+    font-size: 15px;
   }
 
   .hero-weather__forecast {
-    gap: 6px;
-    margin-top: 12px;
+    gap: 10px;
+    margin-top: 16px;
   }
 
   .forecast-chip {
-    gap: 6px;
-    padding: 8px 8px 7px;
-    border-radius: 14px;
+    gap: 8px;
+    padding: 12px 14px 11px;
+    border-radius: 18px;
   }
 
   .forecast-chip__day {
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .forecast-chip__icon {
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
   }
 
   .forecast-chip__temp {
-    gap: 4px;
-    font-size: 14px;
+    gap: 6px;
+    font-size: 20px;
   }
 
   .forecast-chip__temp-min {
-    font-size: 10px;
+    font-size: 14px;
   }
 
+  /* The QLOCKTWO faces are the tightest vertically — give their grid the height
+     the enlarged weather block would otherwise take. */
+  body[data-watch-face="qlocktwo"] .hero-weather,
+  body[data-watch-face="qlocktwo-ooe"] .hero-weather {
+    margin-top: 14px;
+    padding-top: 14px;
+  }
+
+  body[data-watch-face="qlocktwo"] .hero-date,
+  body[data-watch-face="qlocktwo-ooe"] .hero-date {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  /* 250px active keeps the calendar at 6 single-line rows — enough for all three
+     days. Raising it drops rows, and the "shave the largest section first" rule
+     then starts discarding today. Do not raise blindly; re-check the row count. */
   .cards-column {
     gap: 12px;
-    grid-template-rows: minmax(0, 1fr) auto;
+    --tile-h-idle: 96px;
+    --tile-h-active: 250px;
+    --tile-title-idle: 19px;
+    --tile-title-active: 20px;
   }
 
   .card {
@@ -1236,10 +1316,12 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     padding-top: 0;
   }
 
+  /* 86px is the floor for the time cell: "09:00–10:30" measures ~81px at
+     14px/700. Narrower and it wraps, which breaks the uniform row height. */
   .calendar-item,
   .calendar-empty {
-    grid-template-columns: 88px 1fr;
-    gap: 9px;
+    grid-template-columns: 86px 1fr;
+    gap: 8px;
     padding: 9px 11px;
   }
 
@@ -1255,54 +1337,23 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     font-size: 14px;
   }
 
-  /* Active Spotify tile gets the lion's share of the right column on 1024x600.
-     The .is-inactive overrides below stay compact for the no-playback state. */
-  .spotify-body {
-    grid-template-columns: 84px 1fr;
-    gap: 14px;
+  .spotify-tile {
+    border-radius: 24px;
   }
 
-  .spotify-artwork {
-    width: 84px;
-    height: 84px;
-    border-radius: 18px;
+  .spotify-tile__meta {
+    left: 16px;
+    right: 16px;
+    bottom: 18px;
   }
 
-  .spotify-track {
-    font-size: 21px;
-  }
-
-  .spotify-artist,
-  .spotify-device {
-    margin-top: 4px;
+  .spotify-tile__artist {
     font-size: 14px;
-  }
-
-  .spotify-device-row {
-    gap: 8px;
-    margin-top: 8px;
   }
 
   .spotify-device-badge {
     padding: 6px 10px;
     font-size: 12px;
-  }
-
-  .spotify-volume-readout {
-    display: none;
-  }
-
-  .spotify-progress {
-    margin-top: 12px;
-  }
-
-  .spotify-progress__time {
-    font-size: 12px;
-  }
-
-  .spotify-controls {
-    gap: 12px;
-    margin-top: 12px;
   }
 
   .spotify-actions {
@@ -1336,33 +1387,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   .spotify-detail__seek input[type="range"]::-webkit-slider-thumb {
     width: 18px;
     height: 18px;
-  }
-
-  .spotify-card.is-inactive .spotify-body {
-    grid-template-columns: 44px 1fr;
-    gap: 8px;
-  }
-
-  .spotify-card.is-inactive .spotify-artwork {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-  }
-
-  .spotify-card.is-inactive .spotify-controls {
-    display: none;
-  }
-
-  .spotify-card.is-inactive .spotify-track {
-    font-size: 15px;
-  }
-
-  .spotify-card.is-inactive .spotify-device-row {
-    margin-top: 4px;
-  }
-
-  .spotify-card.is-inactive .spotify-device-badge {
-    font-size: 10px;
   }
 
   .toast {
@@ -1502,15 +1526,8 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   pointer-events: auto;
 }
 
-/* Spotify Connect picker — "Musik starten" trigger + full-screen touch sheet.
-   The trigger sits in the Spotify card header and is the entry point even when
-   idle (the transport controls are hidden then). */
-.card__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
+/* Spotify Connect picker — "Musik wählen" trigger + full-screen touch sheet.
+   The trigger lives on the Spotify screen only; the home tile leads there. */
 .pill-button {
   appearance: none;
   border: 0;

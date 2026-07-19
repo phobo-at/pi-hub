@@ -682,30 +682,14 @@
     calendarStatus: document.getElementById("calendar-status"),
     calendarList: document.getElementById("calendar-list"),
     cardsColumn: document.getElementById("cards-column"),
-    spotifyStatus: document.getElementById("spotify-status"),
+    // Home tile is display-only — it has no status pill, no device badge, no
+    // transport and no volume. Every one of those lives on the Spotify screen.
     spotifyCard: document.getElementById("spotify-card"),
     spotifyTrack: document.getElementById("spotify-track"),
     spotifyArtist: document.getElementById("spotify-artist"),
-    spotifyDevice: document.getElementById("spotify-device"),
-    spotifyDeviceBadge: document.getElementById("spotify-device-badge"),
-    spotifyDeviceIcon: document.querySelector(
-      "#spotify-device-badge .spotify-device-badge__icon",
-    ),
-    spotifyVolumeReadout: document.getElementById("spotify-volume-readout"),
     spotifyArtwork: document.getElementById("spotify-artwork"),
-    spotifyPrevious: document.getElementById("spotify-previous"),
-    spotifyPreviousIcon: document.getElementById("spotify-previous-icon"),
-    spotifyToggle: document.getElementById("spotify-toggle"),
-    spotifyToggleIcon: document.getElementById("spotify-toggle-icon"),
-    spotifyNext: document.getElementById("spotify-next"),
-    spotifyNextIcon: document.getElementById("spotify-next-icon"),
-    spotifyVolume: document.getElementById("spotify-volume"),
-    spotifyProgress: document.getElementById("spotify-progress"),
-    spotifyProgressElapsed: document.getElementById("spotify-progress-elapsed"),
-    spotifyProgressTotal: document.getElementById("spotify-progress-total"),
+    spotifyTilePlayIcon: document.getElementById("spotify-tile-play-icon"),
     spotifyProgressFill: document.getElementById("spotify-progress-fill"),
-    spotifyOpenPicker: document.getElementById("spotify-open-picker"),
-    spotifyOpenPickerIcon: document.getElementById("spotify-open-picker-icon"),
     spotifyDetail: document.getElementById("spotify-detail"),
     spotifyDetailStatus: document.getElementById("spotify-detail-status"),
     spotifyDetailArtwork: document.getElementById("spotify-detail-artwork"),
@@ -784,8 +768,11 @@
     const homeVisible = activeScreen === "home";
     const detailVisible = activeScreen === "spotify";
     if (!spotifyProgress) {
-      if (nodes.spotifyProgress && homeVisible) {
-        nodes.spotifyProgress.style.display = "none";
+      // The bar's visibility belongs to `.is-spotify-active` in CSS. Writing an
+      // inline display here would outrank that rule and silently pin it, keyed
+      // on a different condition than the class it fights with.
+      if (nodes.spotifyProgressFill && homeVisible) {
+        nodes.spotifyProgressFill.style.transform = "scaleX(0)";
       }
       if (nodes.spotifyDetailSeek && detailVisible && !seekDragging) {
         nodes.spotifyDetailSeek.max = "0";
@@ -800,11 +787,8 @@
     const elapsedSincePoll = isPlaying ? performance.now() - receivedAt : 0;
     const pos = Math.min(progressMs + elapsedSincePoll, durationMs);
     const ratio = durationMs > 0 ? Math.max(0, Math.min(1, pos / durationMs)) : 0;
-    if (nodes.spotifyProgress && homeVisible) {
-      nodes.spotifyProgress.style.display = "";
+    if (nodes.spotifyProgressFill && homeVisible) {
       nodes.spotifyProgressFill.style.transform = `scaleX(${ratio.toFixed(4)})`;
-      nodes.spotifyProgressElapsed.textContent = formatClockMs(pos);
-      nodes.spotifyProgressTotal.textContent = formatClockMs(durationMs);
     }
     if (nodes.spotifyDetailSeek && detailVisible && !seekDragging) {
       nodes.spotifyDetailSeek.max = String(Math.max(0, Math.round(durationMs)));
@@ -897,11 +881,9 @@
 
   function markVolumeBusy() {
     volumeBusyUntil = performance.now() + VOLUME_BUSY_MS;
-    [nodes.spotifyVolume, nodes.spotifyDetailVolume]
-      .filter(Boolean)
-      .forEach((slider) => {
-        slider.dataset.dirty = "1";
-      });
+    spotifyVolumeSliders().forEach((slider) => {
+      slider.dataset.dirty = "1";
+    });
   }
 
   let toastTimer = null;
@@ -1260,6 +1242,11 @@
     const sections = normalizeCalendarSections(calendar);
     const todayIso = todayIsoInZone();
     setStatus(nodes.calendarStatus, snapshot);
+    // Measure before clearing. The grid row is a plain length today, but if it
+    // ever becomes content-dependent again an emptied list collapses to 0 and the
+    // zero-height fallback below silently renders every event into an
+    // overflowing box — which is exactly what `fit-content(48%)` used to do.
+    const availableHeight = nodes.calendarList.clientHeight;
     nodes.calendarList.innerHTML = "";
 
     if (sections.length === 0) {
@@ -1280,7 +1267,6 @@
     const sectionHasLabel = labels.map((label) => label.length > 0);
     const sectionItemCounts = sections.map((section) => section.items.length);
 
-    const availableHeight = nodes.calendarList.clientHeight;
     let allocated;
     if (availableHeight <= 0) {
       // Plan B7: if the list hasn't been laid out yet we can't measure,
@@ -1306,13 +1292,22 @@
       nodes.calendarList.appendChild(measureLabel);
       const rowHeight = measureRow.offsetHeight || 1;
       const labelHeight = measureLabel.offsetHeight || rowHeight;
+      // Read the gap before the removals dirty style again — it piggybacks on
+      // the recalc the offsetHeight reads above already forced.
+      const listGap =
+        parseFloat(window.getComputedStyle(nodes.calendarList).rowGap) || 0;
       nodes.calendarList.removeChild(measureRow);
       nodes.calendarList.removeChild(measureLabel);
 
       // Use the taller of the two as the uniform row unit so we never
-      // overshoot. With typical CSS the label is slightly larger.
-      const rowUnit = Math.max(rowHeight, labelHeight);
-      const maxRows = Math.max(1, Math.floor(availableHeight / rowUnit));
+      // overshoot. With typical CSS the label is slightly larger. offsetHeight
+      // excludes the list's flex gap, so fold it in — n rows carry n−1 gaps,
+      // hence the matching gap added to the available height.
+      const rowUnit = Math.max(rowHeight, labelHeight) + listGap;
+      const maxRows = Math.max(
+        1,
+        Math.floor((availableHeight + listGap) / rowUnit),
+      );
       allocated = computeRowBudget(sectionItemCounts, maxRows, sectionHasLabel);
     }
 
@@ -1349,7 +1344,7 @@
   }
 
   function spotifyVolumeSliders() {
-    return [nodes.spotifyVolume, nodes.spotifyDetailVolume].filter(Boolean);
+    return [nodes.spotifyDetailVolume].filter(Boolean);
   }
 
   function setSpotifyVolumeUi(value) {
@@ -1357,7 +1352,6 @@
     spotifyVolumeSliders().forEach((slider) => {
       slider.value = String(value === null ? 0 : value);
     });
-    nodes.spotifyVolumeReadout.textContent = text;
     nodes.spotifyDetailVolumeReadout.textContent = text;
   }
 
@@ -1377,51 +1371,48 @@
       spotify.duration_ms > 0 &&
       typeof spotify.progress_ms === "number",
     );
-    setStatus(nodes.spotifyStatus, snapshot);
     setStatus(nodes.spotifyDetailStatus, snapshot);
-    nodes.spotifyCard.classList.toggle("is-inactive", !showControls);
     nodes.spotifyDetail.classList.toggle("is-inactive", !showControls);
     // Give Spotify the lion's share of the column (big artwork) only when there's
     // a controllable session; idle keeps the calm calendar-fills layout so an
-    // empty tile never becomes a big blank box.
+    // empty tile never becomes a big blank box. This class also drives the whole
+    // home tile's state, so it is the single switch for both.
     if (nodes.cardsColumn) {
       nodes.cardsColumn.classList.toggle("is-spotify-active", showControls);
     }
-    // Picker triggers only make sense while Spotify is connected. Both screens
-    // share the same overlay and lazy device/playlist requests.
-    [nodes.spotifyOpenPicker, nodes.spotifyDetailOpenPicker]
-      .filter(Boolean)
-      .forEach((button) => button.classList.toggle("is-hidden", !spotify.connected));
+    // The picker trigger only makes sense while Spotify is connected. It lives on
+    // the Spotify screen only — the home tile leads there instead.
+    if (nodes.spotifyDetailOpenPicker) {
+      nodes.spotifyDetailOpenPicker.classList.toggle("is-hidden", !spotify.connected);
+    }
 
-    setIcon(nodes.spotifyPreviousIcon, "previous");
     setIcon(nodes.spotifyDetailPreviousIcon, "previous");
-    setIcon(nodes.spotifyNextIcon, "next");
     setIcon(nodes.spotifyDetailNextIcon, "next");
     const toggleIcon = spotify.is_playing ? "pause" : "play";
     const toggleLabel = spotify.is_playing
       ? "Wiedergabe pausieren"
       : "Wiedergabe starten";
-    setIcon(nodes.spotifyToggleIcon, toggleIcon);
     setIcon(nodes.spotifyDetailToggleIcon, toggleIcon);
-    nodes.spotifyToggle.setAttribute("aria-label", toggleLabel);
     nodes.spotifyDetailToggle.setAttribute("aria-label", toggleLabel);
 
     const trackLabel =
       spotify.track_title || spotify.empty_message || "Keine aktive Wiedergabe";
     const artistLabel =
       spotify.artist_name || snapshot.error_message || "Spotify nicht verbunden.";
-    nodes.spotifyTrack.textContent = trackLabel;
+    // The home tile doubles as the "start playing" entry point, so with nothing
+    // playing it invites instead of reporting. Errors still surface there: the
+    // artist line falls back to the snapshot's message.
+    nodes.spotifyTrack.textContent = spotify.track_title || "Musik starten";
+    nodes.spotifyArtist.textContent =
+      spotify.artist_name || snapshot.error_message || "";
     nodes.spotifyDetailTrack.textContent = trackLabel;
-    nodes.spotifyArtist.textContent = artistLabel;
     nodes.spotifyDetailArtist.textContent = artistLabel;
     nodes.spotifyDetailAlbum.textContent = spotify.album_name || "";
 
-    setIcon(nodes.spotifyDeviceIcon, "device");
     setIcon(nodes.spotifyDetailDeviceIcon, "device");
     const deviceLabel = [spotify.device_name, spotify.device_type]
       .filter(Boolean)
       .join(" · ");
-    nodes.spotifyDevice.textContent = deviceLabel || "Kein aktives Gerät";
     nodes.spotifyDetailDevice.textContent = deviceLabel || "Kein aktives Gerät";
 
     const artwork = spotify.album_art_url
@@ -1436,9 +1427,6 @@
 
     const transportDisabled = !spotify.can_control;
     [
-      nodes.spotifyPrevious,
-      nodes.spotifyToggle,
-      nodes.spotifyNext,
       nodes.spotifyDetailPrevious,
       nodes.spotifyDetailToggle,
       nodes.spotifyDetailNext,
@@ -1824,11 +1812,15 @@
     ) {
       return;
     }
+    // Suppress before the no-op guard: a swipe that lands on the screen we are
+    // already on still ends in a synthetic click, which would otherwise activate
+    // whatever sits under the finger — the Spotify tile covers a third of the
+    // column now, so that is a real misfire, not a theoretical one.
+    suppressClickUntil = performance.now() + 150;
     const target = dx < 0 ? "spotify" : "home";
     if (target === activeScreen) {
       return;
     }
-    suppressClickUntil = performance.now() + 150;
     setActiveScreen(target);
   }
 
@@ -2309,6 +2301,18 @@
       });
     }
 
+    // The whole tile leads to the Spotify screen — playing or idle, where it
+    // reads "Musik starten". It sits inside .screen-stage, whose capture-phase
+    // handler already swallows the synthetic click a swipe emits.
+    if (nodes.spotifyCard) {
+      nodes.spotifyCard.addEventListener("click", () => {
+        if (screensaverActive) {
+          return;
+        }
+        setActiveScreen("spotify");
+      });
+    }
+
     if (nodes.toast) {
       nodes.toast.addEventListener("pointerdown", hideToast, { passive: true });
     }
@@ -2393,15 +2397,9 @@
       }
     }
 
-    [nodes.spotifyToggle, nodes.spotifyDetailToggle].forEach((button) => {
-      button.addEventListener("click", toggleSpotifyPlayback);
-    });
-    [nodes.spotifyNext, nodes.spotifyDetailNext].forEach((button) => {
-      button.addEventListener("click", skipSpotifyNext);
-    });
-    [nodes.spotifyPrevious, nodes.spotifyDetailPrevious].forEach((button) => {
-      button.addEventListener("click", skipSpotifyPrevious);
-    });
+    nodes.spotifyDetailToggle.addEventListener("click", toggleSpotifyPlayback);
+    nodes.spotifyDetailNext.addEventListener("click", skipSpotifyNext);
+    nodes.spotifyDetailPrevious.addEventListener("click", skipSpotifyPrevious);
 
     // Commit the slider value to the backend. Routed through one helper so both
     // `input` (fires continuously while dragging — the reliable signal on the
@@ -2483,13 +2481,11 @@
       renderSpotifyProgress();
     }, { passive: true });
 
-    setIcon(nodes.spotifyOpenPickerIcon, "device");
+    setIcon(nodes.spotifyTilePlayIcon, "play");
     setIcon(nodes.spotifyDetailOpenPickerIcon, "device");
-    [nodes.spotifyOpenPicker, nodes.spotifyDetailOpenPicker]
-      .filter(Boolean)
-      .forEach((button) => {
-        button.addEventListener("click", openSpotifyPicker);
-      });
+    if (nodes.spotifyDetailOpenPicker) {
+      nodes.spotifyDetailOpenPicker.addEventListener("click", openSpotifyPicker);
+    }
     if (nodes.pickerClose) {
       nodes.pickerClose.addEventListener("click", closeSpotifyPicker);
     }

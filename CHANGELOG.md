@@ -11,6 +11,57 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-19
+
+### Geändert
+
+- Homescreen-Aufteilung gedreht: links **2/3** (Uhr, Datum, Wetter), rechts
+  **1/3** (Termine, Spotify). Vorher 38/62 zugunsten der Termine. Ein Termin
+  besteht aus Uhrzeit und kurzem Titel und brauchte die 613 px nie; die Uhr ist
+  die Kernfunktion aus 1–2 m. Die Hero-Innenfläche wächst von 323 px auf 605 px.
+- Uhr und Wetter entsprechend vergrößert (Flip-Ziffern 72→132 px breit,
+  Temperatur 44→64 px, Vorschau-Chips größer). Die Clamp-Maxima greifen bei
+  genau 1024 px, wie im bestehenden Idiom.
+- Die Spotify-Kachel auf dem Homescreen ist jetzt reine Anzeige: vollflächiges
+  Artwork mit Scrim, Titel, Interpret und ein Fortschrittsbalken. Die gesamte
+  Kachel ist tippbar und öffnet den Spotify-Screen — auch im Leerlauf, wo sie
+  „Musik starten“ zeigt. Bei laufender Session 250 px hoch, im Leerlauf 96 px.
+- Termintitel sind einzeilig mit Ellipse. Zweizeilig hätte das Zeilenbudget in
+  der schmalen Spalte auf 4 gedrückt, wodurch die „größten Abschnitt zuerst
+  kürzen“-Regel **heute** komplett verworfen hätte.
+- Zustand der rechten Spalte läuft über vererbte Custom Properties statt über
+  konkurrierende Zustands-/Größenselektoren.
+
+### Entfernt
+
+- Transport-Controls, Lautstärkeregler, Geräte-Badge, Status-Badge und die
+  Zeitangaben von der Homescreen-Spotify-Kachel. Alles davon liegt auf Screen 2.
+  Das Geräte-/Playlist-Overlay wird dadurch über Screen 2 → „Musik wählen“
+  erreicht. Fehler bleiben auf dem Homescreen sichtbar: Die Artist-Zeile fällt
+  auf die Fehlermeldung des Snapshots zurück.
+
+### Behoben
+
+- Das Zeilenbudget des Kalenders war in genau dem Layout wirkungslos, für das es
+  geschrieben wurde: `fit-content(48%)` machte die Kalenderzeile inhaltsabhängig,
+  die vor der Messung geleerte Liste kollabierte, und der Null-Höhen-Fallback
+  rendert alle Termine in eine überlaufende Box. Beide Grid-Zeilen sind jetzt
+  inhaltsunabhängig, zusätzlich wird vor dem Leeren gemessen.
+- `rowUnit` ignorierte den Flex-Gap der Liste (`offsetHeight` enthält ihn nicht),
+  wodurch das Budget bei mehreren Zeilen überzeichnete. Vorher vom
+  `fit-content`-Fehler verdeckt.
+- Die QLOCKTWO-Faces liefen ~11 px über und wurden von `overflow: hidden`
+  beschnitten. Ihr Raster ist quadratisch und damit höhengebunden — der neue
+  300-px-Deckel behebt das.
+- Eine Wischgeste, die auf dem bereits aktiven Screen endete, unterdrückte den
+  synthetischen Klick nicht. Mit der großen Spotify-Kachel hätte ein solcher
+  Fehlwisch navigiert.
+- `.spotify-artwork` wurde in der Kiosk-Media-Query nie wirksam, weil die
+  Zustandsregel höher spezifisch war. Mit den alten Regeln entfallen. Die
+  Kachelhöhe läuft jetzt über ein `--tile-h-idle`/`--tile-h-active`-Paar, das ein
+  Breakpoint nicht mehr halb definieren kann — Media-Queries erhöhen die
+  Spezifität nicht, weshalb dieselbe Falle sonst sofort wieder zuschnappt.
+
 ## [0.5.1] - 2026-07-19
 
 ### Behoben

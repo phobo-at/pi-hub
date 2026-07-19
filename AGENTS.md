@@ -42,11 +42,12 @@ Die UI hat zwei Screens, gewechselt per horizontalem Wisch (rein client-seitig, 
 
 **Screen 1 — Homescreen (Standard).** Die Zielhierarchie ist:
 
-- links: Uhrzeit, Datum, Wetter mit kompakter Vorschau (3 Tage; bei den platzhungrigen QLOCKTWO-Faces auf 2 Tage reduziert)
-- rechts oben: Termine
-- rechts unten: Spotify Wiedergabe
+- links (2/3 der Breite): Uhrzeit, Datum, Wetter mit kompakter Vorschau (3 Tage; bei den platzhungrigen QLOCKTWO-Faces auf 2 Tage reduziert) — bewusst groß, das ist die Kernfunktion aus 1–2 m
+- rechts (1/3): oben Termine, darunter die Spotify-Kachel
 
-**Screen 2 — Spotify-Steuerung.** Großes Artwork, Scrubbing, Transport- und Lautstärkeregler (mit Screen 1 synchron), die nächsten vier Titel der Warteschlange sowie das bestehende Geräte-/Playlist-Overlay. Die Warteschlange wird nur geladen, solange dieser Screen sichtbar ist; der Screensaver setzt die UI immer auf den Homescreen zurück.
+Die Gewichtung war früher umgekehrt (Termine breit). Ein Termin besteht aus Uhrzeit und kurzem Titel und braucht die Breite nicht; die Uhr schon. Nicht zurückdrehen.
+
+**Screen 2 — Spotify-Steuerung.** Großes Artwork, Scrubbing, Transport- und Lautstärkeregler, die nächsten vier Titel der Warteschlange sowie das Geräte-/Playlist-Overlay. Screen 2 besitzt die **gesamte** Spotify-Interaktion — Screen 1 ist reine Anzeige, es gibt nichts mehr zu synchronisieren. Die Warteschlange wird nur geladen, solange dieser Screen sichtbar ist; der Screensaver setzt die UI immer auf den Homescreen zurück.
 
 Wichtige aktuelle UI-Entscheidungen:
 
@@ -54,9 +55,12 @@ Wichtige aktuelle UI-Entscheidungen:
 - keine überflüssigen Überschriften wie „Startbildschirm“
 - Status-Badges werden im Normalzustand nicht angezeigt
 - Kalender zeigt heute, morgen und übermorgen (Tagesüberschriften mit Wochentag, z. B. „Heute · Montag“), aber nur so viel wie in den verfügbaren Platz passt
-- Spotify zeigt Transport-Controls nur bei sinnvoll steuerbarer Session, plus einen Track-Fortschrittsbalken (client-seitig interpoliert zwischen den Polls)
-- Bei laufender Spotify-Session bekommt die Spotify-Kachel die meiste Höhe der rechten Spalte (großes Artwork), die Termine-Kachel schrumpft auf Inhaltshöhe; im Leerlauf bleibt das ruhige Layout (Termine füllen, Spotify kompakt)
-- Die Hero-Uhr ist per Touch umschaltbar zwischen `classic` (digital), `qlocktwo` (deutsches Wortuhr-Raster) und `analog` (SVG). Start-Face kommt aus `app.watch_face` bzw. `APP_WATCH_FACE`, die Nutzerwahl persistiert im `localStorage` — kein Server-Roundtrip.
+- Termintitel sind **einzeilig mit Ellipse**. Zweizeilige Titel verdoppeln die Zeilenhöhe, das Budget fällt auf 4 Zeilen, und die „größten Abschnitt zuerst kürzen“-Regel wirft dann **heute** komplett raus. Drei sichtbare Tage schlagen vollständige Titel.
+- Der Homescreen zeigt für Spotify nur noch Artwork (vollflächig, mit Scrim) plus einen Track-Fortschrittsbalken (client-seitig zwischen den Polls interpoliert). Transport, Lautstärke, Gerätewahl und die Zeitangaben liegen **ausschließlich** auf Screen 2. Die gesamte Kachel ist tippbar und öffnet Screen 2 — auch im Leerlauf, wo sie „Musik starten“ zeigt. Kein Status-Badge auf dem Homescreen; Fehler erscheinen als Text in der Artist-Zeile.
+- Bei laufender Session ist die Spotify-Kachel 250 px hoch (großes Artwork), im Leerlauf 96 px. Beide Grid-Zeilen sind fixe Werte bzw. `1fr` — **bewusst nicht inhaltsabhängig**, weil `renderCalendar` sein Zeilenbudget aus `clientHeight` einer bereits geleerten Liste zieht und eine `fit-content`-Zeile dabei kollabiert.
+- Zustand der rechten Spalte läuft über vererbte Custom Properties (`--tile-h`, `--tile-title`) auf `.cards-column`, Größen über die Kiosk-Media-Query. Nicht mischen: Zustands- und Größenregel auf derselben Eigenschaft bei unterschiedlicher Spezifität war die Ursache des alten 150-px-vs-84-px-Artwork-Bugs.
+- Die Hero-Uhr ist per Touch umschaltbar zwischen `flip` (Standard), `lcd`, `pulse`, `qlocktwo`, `qlocktwo-ooe` und `analog`. Start-Face kommt aus `app.watch_face` bzw. `APP_WATCH_FACE`, die Nutzerwahl persistiert im `localStorage` — kein Server-Roundtrip.
+- Die QLOCKTWO-Faces wachsen bewusst **nicht** mit der breiteren Spalte: Ihr Raster ist `aspect-ratio: 1/1` und damit höhen-, nicht breitengebunden. Der 300-px-Deckel behebt ein vorher bestehendes Clipping.
 
 Diese Entscheidungen nicht versehentlich zurückbauen.
 

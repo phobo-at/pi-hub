@@ -142,56 +142,24 @@
           <ul class="calendar-list" id="calendar-list"></ul>
         </article>
 
-        <article class="card spotify-card" id="spotify-card">
-          <header class="card__header">
-            <h2 class="card__title">Spotify Wiedergabe</h2>
-            <div class="card__header-actions">
-              <button type="button" class="pill-button is-hidden" id="spotify-open-picker" aria-label="Musik auf Gerät starten">
-                <span class="pill-button__icon" id="spotify-open-picker-icon" aria-hidden="true"></span>
-                <span class="pill-button__label">Musik starten</span>
-              </button>
-              <span class="status-pill is-hidden" id="spotify-status">Laden</span>
-            </div>
-          </header>
-          <div class="spotify-body">
-            <div class="spotify-artwork" id="spotify-artwork"></div>
-            <div class="spotify-copy">
-              <div class="spotify-track" id="spotify-track">Keine aktive Wiedergabe</div>
-              <div class="spotify-artist" id="spotify-artist">Spotify nicht verbunden.</div>
-              <div class="spotify-device-row">
-                <div class="spotify-device-badge" id="spotify-device-badge">
-                  <span class="spotify-device-badge__icon" aria-hidden="true"></span>
-                  <span id="spotify-device">Kein aktives Gerät</span>
-                </div>
-                <div class="spotify-volume-readout" id="spotify-volume-readout"></div>
-              </div>
-            </div>
-          </div>
-          <div class="spotify-progress" id="spotify-progress">
-            <span class="spotify-progress__time" id="spotify-progress-elapsed">0:00</span>
-            <div class="spotify-progress__track">
-              <div class="spotify-progress__fill" id="spotify-progress-fill"></div>
-            </div>
-            <span class="spotify-progress__time" id="spotify-progress-total">0:00</span>
-          </div>
-          <div class="spotify-controls">
-            <div class="spotify-actions">
-              <button type="button" class="icon-button" id="spotify-previous" aria-label="Vorheriger Titel">
-                <span class="icon-button__icon" id="spotify-previous-icon" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="icon-button icon-button--primary" id="spotify-toggle" aria-label="Wiedergabe umschalten">
-                <span class="icon-button__icon" id="spotify-toggle-icon" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="icon-button" id="spotify-next" aria-label="Nächster Titel">
-                <span class="icon-button__icon" id="spotify-next-icon" aria-hidden="true"></span>
-              </button>
-            </div>
-            <label class="spotify-volume" for="spotify-volume">
-              <span class="spotify-volume__label">Lautstärke</span>
-              <input type="range" min="0" max="100" step="1" value="0" id="spotify-volume">
-            </label>
-          </div>
-        </article>
+        <!-- Display only: the whole tile is the way into the Spotify screen, so
+             transport, volume, device picker and the elapsed/total times all live
+             there and nowhere else. Only <span>s inside a <button> — a <button>
+             takes phrasing content, not <div>. -->
+        <button type="button" class="spotify-tile" id="spotify-card" aria-label="Spotify-Steuerung öffnen">
+          <span class="spotify-tile__inner">
+            <span class="spotify-tile__art" id="spotify-artwork" aria-hidden="true"></span>
+            <span class="spotify-tile__scrim" aria-hidden="true"></span>
+            <span class="spotify-tile__meta">
+              <span class="spotify-tile__play" id="spotify-tile-play-icon" aria-hidden="true"></span>
+              <span class="spotify-tile__track" id="spotify-track">Musik starten</span>
+              <span class="spotify-tile__artist" id="spotify-artist"></span>
+            </span>
+            <span class="spotify-tile__progress" id="spotify-progress" aria-hidden="true">
+              <span class="spotify-tile__progress-fill" id="spotify-progress-fill"></span>
+            </span>
+          </span>
+        </button>
       </section>
     </main>
       </div>

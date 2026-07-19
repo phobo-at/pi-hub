@@ -332,3 +332,44 @@ def make_state_store(tmp_dir: Path, **overrides: Any) -> StateStore:
 def drain_responses(routes: Iterable[_Route]) -> None:  # pragma: no cover - debug only
     for route in routes:
         route.responses.clear()
+
+
+class NullScheduler:
+    """Scheduler stand-in for route tests. Mirrors the real ``set_paused``
+    signature (smart_display/scheduler.py) so a rename shows up here."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool]] = []
+
+    def set_paused(self, group: str, paused: bool) -> None:
+        self.calls.append((group, paused))
+
+
+def make_blueprint_app(
+    tmp_dir: Path,
+    *,
+    scheduler: Any = None,
+    spotify_provider: Any = None,
+    **overrides: Any,
+):
+    """Flask app wired with the routes blueprint and the extension dict
+    ``smart_display/web/routes.py`` expects. Kept here because that dict is the
+    coupling point to routes.py — adding a key should be a one-file change."""
+    from flask import Flask
+
+    from smart_display.web.routes import create_blueprint
+
+    app = Flask(
+        __name__,
+        template_folder=str(
+            Path(__file__).parent.parent / "smart_display" / "web" / "templates"
+        ),
+    )
+    app.extensions["smart_display"] = {
+        "config": make_app_config(tmp_dir, **overrides),
+        "state_store": make_state_store(tmp_dir, **overrides),
+        "scheduler": scheduler if scheduler is not None else NullScheduler(),
+        "spotify_provider": spotify_provider,
+    }
+    app.register_blueprint(create_blueprint())
+    return app

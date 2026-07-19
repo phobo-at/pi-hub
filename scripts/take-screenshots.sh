@@ -54,6 +54,10 @@ for face in "${FACES[@]}"; do
     exit 1
   fi
 
+  # The mock provider's job has a 1s startup delay; screenshotting the instant
+  # the server answers renders an empty calendar.
+  sleep 3
+
   tmp_profile="$(mktemp -d)"
   # Chrome's headless sometimes hangs after writing the PNG; a 20 s cap is
   # plenty for a single-page screenshot and guarantees forward progress.
