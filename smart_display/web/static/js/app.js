@@ -17,7 +17,9 @@
   const SCREEN_TRANSITION_MS = 220;
   const QUEUE_REFRESH_MS = 30_000;
   const SWIPE_MIN_X = 72;
-  const SWIPE_MAX_MS = 800;
+  // Generous on purpose: a deliberate swipe on a wall-mounted panel is slower
+  // than a phone flick, and 800 ms rejected careful gestures outright.
+  const SWIPE_MAX_MS = 1500;
   const SWIPE_AXIS_RATIO = 1.3;
   const lastRenderedSectionKeys = {
     weather: "",
@@ -1776,38 +1778,47 @@
     return Boolean(target && target.closest && target.closest("input, label"));
   }
 
-  function handleSwipeStart(event) {
-    if (
-      screensaverActive ||
-      event.isPrimary === false ||
-      (typeof event.button === "number" && event.button !== 0) ||
-      swipeTargetIsInteractive(event.target)
-    ) {
+  // The gesture is tracked from whichever event family fires first and stays
+  // locked to it, so engines that emit both Pointer and Touch events cannot
+  // process one swipe twice. WPE (the kiosk engine) and Blink (what local
+  // checks run against) differ here, so neither family is assumed.
+  function beginSwipe(source, id, x, y, target) {
+    if (screensaverActive || swipeTargetIsInteractive(target)) {
       swipeStart = null;
       return;
     }
-    swipeStart = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      at: performance.now(),
-    };
+    if (swipeStart && swipeStart.source !== source) {
+      return; // another family already owns this gesture
+    }
+    swipeStart = { source, id, x, y, lastX: x, lastY: y, at: performance.now() };
     // Deliberately no setPointerCapture: pointer events already bubble to the
     // stage, and capturing on an ancestor retargets the compatibility mouse
     // events, which would swallow taps on the buttons we just made swipeable.
   }
 
-  function handleSwipeEnd(event) {
-    if (!swipeStart || swipeStart.pointerId !== event.pointerId) {
+  function trackSwipe(source, id, x, y) {
+    if (!swipeStart || swipeStart.source !== source || swipeStart.id !== id) {
+      return;
+    }
+    swipeStart.lastX = x;
+    swipeStart.lastY = y;
+  }
+
+  // `x`/`y` are omitted when the engine cancels the gesture (it took the touch
+  // over for its own scrolling/navigation); the last tracked position is used
+  // instead, so a swipe that already qualified still lands.
+  function finishSwipe(source, id, x, y) {
+    if (!swipeStart || swipeStart.source !== source || swipeStart.id !== id) {
       return;
     }
     const gesture = swipeStart;
     swipeStart = null;
-    const dx = event.clientX - gesture.x;
-    const dy = event.clientY - gesture.y;
-    const elapsed = performance.now() - gesture.at;
+    const endX = typeof x === "number" ? x : gesture.lastX;
+    const endY = typeof y === "number" ? y : gesture.lastY;
+    const dx = endX - gesture.x;
+    const dy = endY - gesture.y;
     if (
-      elapsed > SWIPE_MAX_MS ||
+      performance.now() - gesture.at > SWIPE_MAX_MS ||
       Math.abs(dx) < SWIPE_MIN_X ||
       Math.abs(dx) < Math.abs(dy) * SWIPE_AXIS_RATIO
     ) {
@@ -1821,8 +1832,62 @@
     setActiveScreen(target);
   }
 
-  function handleSwipeCancel() {
-    swipeStart = null;
+  function handleSwipeStart(event) {
+    if (
+      event.isPrimary === false ||
+      (typeof event.button === "number" && event.button !== 0)
+    ) {
+      return;
+    }
+    beginSwipe("pointer", event.pointerId, event.clientX, event.clientY, event.target);
+  }
+
+  function handleSwipeMove(event) {
+    trackSwipe("pointer", event.pointerId, event.clientX, event.clientY);
+  }
+
+  function handleSwipeEnd(event) {
+    finishSwipe("pointer", event.pointerId, event.clientX, event.clientY);
+  }
+
+  function handleSwipeCancel(event) {
+    finishSwipe("pointer", event.pointerId);
+  }
+
+  function touchPoint(event) {
+    return event.changedTouches && event.changedTouches[0];
+  }
+
+  function handleTouchStart(event) {
+    if (event.touches && event.touches.length > 1) {
+      swipeStart = null;
+      return;
+    }
+    const touch = touchPoint(event);
+    if (touch) {
+      beginSwipe("touch", touch.identifier, touch.clientX, touch.clientY, event.target);
+    }
+  }
+
+  function handleTouchMove(event) {
+    const touch = touchPoint(event);
+    if (touch) {
+      trackSwipe("touch", touch.identifier, touch.clientX, touch.clientY);
+    }
+  }
+
+  function handleTouchEnd(event) {
+    const touch = touchPoint(event);
+    if (touch) {
+      finishSwipe("touch", touch.identifier, touch.clientX, touch.clientY);
+    }
+  }
+
+  function handleTouchCancel(event) {
+    const touch = touchPoint(event);
+    if (touch) {
+      finishSwipe("touch", touch.identifier);
+    }
   }
 
   // ---- Detail-screen seek ------------------------------------------------
@@ -2251,8 +2316,16 @@
     if (nodes.screenStage) {
       nodes.spotifyScreen.setAttribute("inert", "");
       nodes.screenStage.addEventListener("pointerdown", handleSwipeStart, { passive: true });
+      nodes.screenStage.addEventListener("pointermove", handleSwipeMove, { passive: true });
       nodes.screenStage.addEventListener("pointerup", handleSwipeEnd, { passive: true });
       nodes.screenStage.addEventListener("pointercancel", handleSwipeCancel, { passive: true });
+      // Touch fallback for engines whose Pointer Events are incomplete for
+      // touch input, and so a gesture the engine cancels mid-way still lands.
+      // beginSwipe locks the gesture to one family, so this cannot double-fire.
+      nodes.screenStage.addEventListener("touchstart", handleTouchStart, { passive: true });
+      nodes.screenStage.addEventListener("touchmove", handleTouchMove, { passive: true });
+      nodes.screenStage.addEventListener("touchend", handleTouchEnd, { passive: true });
+      nodes.screenStage.addEventListener("touchcancel", handleTouchCancel, { passive: true });
       nodes.screenStage.addEventListener(
         "click",
         (event) => {

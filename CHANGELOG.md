@@ -11,6 +11,23 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-19
+
+### Behoben
+
+- Zurückwischen vom Spotify-Screen funktionierte auf dem Gerät nicht. Die
+  Geste ist jetzt gegen Engine-Unterschiede gehärtet, statt Pointer-Events
+  in Blink-Semantik vorauszusetzen:
+  - Bricht die Engine die Geste ab (`pointercancel`/`touchcancel`, weil sie
+    den Touch für eigenes Scrollen oder eine Navigationsgeste übernimmt),
+    wird der Wisch trotzdem ausgeführt, sofern er die Schwelle schon
+    überschritten hatte. Vorher wurde er ersatzlos verworfen.
+  - Touch-Events als zweiter Pfad, falls Pointer-Events für Touch
+    unvollständig sind. Die Geste wird an die zuerst feuernde Familie
+    gebunden, kann also nicht doppelt ausgelöst werden.
+  - `SWIPE_MAX_MS` von 800 ms auf 1500 ms. Ein überlegter Wisch am
+    Wandpanel ist langsamer als ein Handy-Flick.
+
 ## [0.5.0] - 2026-07-19
 
 ### Entfernt
@@ -157,7 +174,8 @@ Erste Version. Nie getaggt; entstanden zwischen dem 2026-04-08 und 2026-04-15.
   Abbruch bei abweichendem Bind.
 - `install-pi.sh` plus systemd-Units für Backend und Chromium-Kiosk.
 
-[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/phobo-at/pi-hub/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/phobo-at/pi-hub/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/phobo-at/pi-hub/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/phobo-at/pi-hub/compare/v0.3.1...v0.4.0
