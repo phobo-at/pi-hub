@@ -73,6 +73,32 @@ Env-var → config-key mapping lives in `_apply_env_overrides`. `CALENDAR_NAME` 
 - The two screens have **disjoint** control surfaces: the home screen is display-only, and every Spotify interaction — transport, volume, seek, device/playlist picker — lives on screen 2. The home Spotify tile is a `<button>` whose only job is navigating there, so `renderSpotify` writes the home nodes for text/artwork and the detail nodes for everything else. Don't re-add a control to the home tile without also re-adding its node to `nodes`; most accesses there are unguarded and a missing id throws on the first poll.
 - When adding a new scheduled job, register it in `create_app()` *and* add a refresh interval in `RefreshIntervalsConfig` + `default.yaml` + the env mapping. Don't hardcode an interval at the call site.
 
+## Post-ship deploy (runs as part of `/ship`)
+
+After a successful push, deploy to the Pi:
+
+```bash
+bash scripts/deploy-pi.sh
+```
+
+**Only when the diff touches code that runs on the device** — `smart_display/`,
+`config/`, `deploy/`, `scripts/`, or `pyproject.toml`. Skip it for a diff that is
+only docs, `CHANGELOG.md`, `docs/screenshots/`, or `tests/`: restarting the kiosk
+blanks a wall panel that is otherwise on 24/7, and nothing about those files
+reaches the device at runtime.
+
+`deploy-pi.sh` rsyncs the working tree to `/opt/smart-display` and restarts both
+units. It is *not* `install-pi.sh` — that one provisions a fresh machine (apt,
+venv, systemd units) and is the wrong tool for a code change. The rsync excludes
+everything the device owns and the repo cannot recreate: `.env`, `.kiosk.env`,
+`data/` (state cache + screensaver images), `.venv`, and the editable-install
+egg-info. Target host comes from `PI_HOST` (default `pi@192.168.178.22`).
+
+The script reports version, both unit states, the kiosk restart count and
+`/health`. It **cannot** verify the panel visually — Cog renders straight to DRM,
+so there is no screenshot path on the device. A green report means the services
+came back, not that the UI is correct; say so rather than implying it was seen.
+
 ## Deployment shape
 
 The Pi runs two systemd units from `deploy/systemd/`: `smart-display.service` (the Waitress backend) and `smart-display-kiosk.service`. Anything that breaks unattended startup, idle behavior, or the screensaver fallback is a release blocker.

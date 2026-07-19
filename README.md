@@ -101,6 +101,22 @@ Key settings:
 
 ## Deploying to the Pi
 
+### Updating a Pi that already runs it
+
+```bash
+bash scripts/deploy-pi.sh              # sync + restart both units + health check
+bash scripts/deploy-pi.sh --dry-run    # preview what would change
+```
+
+Syncs the working tree to `/opt/smart-display` and restarts the backend and the
+kiosk. Credentials (`.env`, `.kiosk.env`), the state cache and screensaver images
+(`data/`) and the venv stay untouched. Set `PI_HOST` to target a different device
+(default `pi@192.168.178.22`). Note that the panel cannot be screenshotted — Cog
+renders directly to DRM — so a green report confirms the services restarted, not
+that the UI looks right.
+
+### First install
+
 Simplest path on a fresh Raspberry Pi OS Lite install: clone the repo and run `scripts/install-pi.sh`. The script installs the X11/kiosk packages, creates the venv, writes `Xwrapper.config`, deploys to `/opt/smart-display`, and enables both systemd units. By default it uses the user that invoked `sudo`; set `SMART_DISPLAY_USER=...` if the service should run as a different user.
 
 ```bash
