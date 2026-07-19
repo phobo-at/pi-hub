@@ -640,7 +640,6 @@
     screenStage: document.getElementById("screen-stage"),
     homeScreen: document.getElementById("screen-home"),
     spotifyScreen: document.getElementById("screen-spotify"),
-    screenButtons: Array.from(document.querySelectorAll("[data-screen-target]")),
     date: document.getElementById("clock-date"),
     watchFace: document.getElementById("watch-face"),
     flipFace: document.getElementById("watch-face-flip"),
@@ -1738,15 +1737,6 @@
         screen.setAttribute("inert", "");
       }
     });
-    nodes.screenButtons.forEach((button) => {
-      const selected = button.dataset.screenTarget === target;
-      button.classList.toggle("is-active", selected);
-      if (selected) {
-        button.setAttribute("aria-current", "page");
-      } else {
-        button.removeAttribute("aria-current");
-      }
-    });
 
     if (target === "spotify") {
       // The home face is hidden but still in the DOM, so its second-hand timer
@@ -1777,12 +1767,13 @@
     }, SCREEN_TRANSITION_MS);
   }
 
+  // Only the sliders are excluded: they own the horizontal axis, so a drag
+  // there must set volume/position rather than page. Buttons stay swipeable —
+  // a horizontal drag across one pages, a tap still activates it (the swipe's
+  // own click suppression handles the difference). The picker and toast are
+  // siblings of .screen-stage, so their events never reach this handler.
   function swipeTargetIsInteractive(target) {
-    return Boolean(
-      target &&
-      target.closest &&
-      target.closest("button, input, label, a, [role='dialog'], .picker, .toast"),
-    );
+    return Boolean(target && target.closest && target.closest("input, label"));
   }
 
   function handleSwipeStart(event) {
@@ -1801,13 +1792,9 @@
       y: event.clientY,
       at: performance.now(),
     };
-    if (nodes.screenStage.setPointerCapture) {
-      try {
-        nodes.screenStage.setPointerCapture(event.pointerId);
-      } catch (error) {
-        /* pointer capture is optional on older kiosk engines */
-      }
-    }
+    // Deliberately no setPointerCapture: pointer events already bubble to the
+    // stage, and capturing on an ancestor retargets the compatibility mouse
+    // events, which would swallow taps on the buttons we just made swipeable.
   }
 
   function handleSwipeEnd(event) {
@@ -2281,9 +2268,6 @@
         true,
       );
     }
-    nodes.screenButtons.forEach((button) => {
-      button.addEventListener("click", () => setActiveScreen(button.dataset.screenTarget));
-    });
 
     async function toggleSpotifyPlayback() {
       const currentSpotify = state.spotify || {};

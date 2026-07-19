@@ -68,7 +68,7 @@ teils mehrfach revidiert worden.
 ### 6. UI-Hierarchie (Re-Litigation vermeiden)
 - Keine Wiedereinführung von: Status-Badges im `ok`-Zustand, „Startbildschirm"-Heading, separatem Wetter-Tile rechts, Timezone-Label unter dem Hero-Datum.
 - 1024×600 tatsächlich validiert, nicht nur Desktop-Viewport.
-- Zwei Screens (Homescreen + Spotify-Steuerung, Wisch oder Seitenpunkt): Beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf, genau ein `<main>`. Der Screensaver setzt immer auf den Homescreen zurück.
+- Zwei Screens (Homescreen + Spotify-Steuerung, horizontaler Wisch, keine Seitenindikatoren): Beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf, genau ein `<main>`. Der Screensaver setzt immer auf den Homescreen zurück.
 - Layout-Kopplungen: Ändert eine Sektion die Höhe einer anderen (z. B. `is-spotify-active` auf die Kalenderzeile), muss die betroffene Sektion neu vermessen werden — die Render-Dedup pro Sektion darf das nicht überspringen.
 
 ### 7. Persistenz & Cache

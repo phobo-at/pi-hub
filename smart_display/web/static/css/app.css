@@ -1,10 +1,4 @@
 :root {
-  /* Midpoint of the visible screen's column gap, as a % of the stage width —
-     the page dots sit there. The two screens have DIFFERENT splits, and the
-     dots are absolutely positioned in the shared .screen-stage, so this has to
-     be re-declared per screen (see [data-active-screen]) or they land on a card
-     edge. Base value is the home screen's 0.9fr / 1.1fr with an 18px gap. */
-  --shell-gutter: 45%;
   --bg: #0f1216;
   --bg-soft: #161b22;
   --panel: rgba(20, 24, 31, 0.96);
@@ -52,8 +46,6 @@ body {
 .dashboard-shell {
   display: grid;
   flex: 1 1 auto;
-  /* --shell-gutter (on :root, read by .screen-pagination) is the midpoint of the
-     column gap as a percentage of the stage width. Retune it with the split. */
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 18px;
   width: 100%;
@@ -1087,11 +1079,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     gap: 12px;
   }
 
-  /* 1024x600 kiosk home screen: 0.76 / (0.76 + 1.24) plus half the 12px gap. */
-  :root {
-    --shell-gutter: 38.1%;
-  }
-
   .hero-panel__inner {
     padding: 24px 26px;
     padding-top: 28px;
@@ -1835,14 +1822,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
   touch-action: pan-y;
 }
 
-/* The Spotify screen splits 0.78fr / 1.22fr with a 12px gap — a different
-   gutter than the home screen, and unlike the home split it does not change
-   across breakpoints. Declared on the stage so it beats the :root value for
-   the dots nested inside; without it they sit on a card edge. */
-.screen-stage[data-active-screen="spotify"] {
-  --shell-gutter: 39.1%;
-}
-
 .display-screen {
   position: absolute;
   inset: 0;
@@ -1879,69 +1858,6 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
 
 .screen-stage.is-instant .display-screen {
   transition: none;
-}
-
-.screen-pagination {
-  position: absolute;
-  z-index: 5;
-  /* Sits in the gutter between the hero panel and the cards column, so it
-     tracks whatever column split is in force. --shell-gutter is defined next
-     to each `.dashboard-shell` grid-template-columns rule — keep them together
-     or the dots drift onto the hero panel. */
-  left: calc(var(--shell-gutter, 45%) - 24px);
-  top: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transform: translateY(-50%);
-}
-
-/* Single column: no gutter to sit in, so run the dots along the bottom edge
-   instead of floating them over the stacked cards. Must come AFTER the base
-   rule — a media query adds no specificity, so source order decides. */
-@media (max-width: 900px) {
-  .screen-pagination {
-    left: 50%;
-    top: auto;
-    bottom: 4px;
-    flex-direction: row;
-    transform: translateX(-50%);
-  }
-}
-
-.screen-pagination__button {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.screen-pagination__button:focus-visible {
-  border-radius: 14px;
-  outline: 2px solid rgba(216, 231, 255, 0.55);
-  outline-offset: -5px;
-}
-
-.screen-pagination__button span {
-  display: block;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.24);
-  transition: width var(--transition), background var(--transition);
-}
-
-.screen-pagination__button.is-active span {
-  width: 22px;
-  background: rgba(216, 231, 255, 0.88);
 }
 
 /* Full Spotify controller: deliberately fixed to the 1024x600 kiosk canvas. */

@@ -11,6 +11,26 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-19
+
+### Entfernt
+
+- Die Seitenindikatoren. Sie waren vertikal gestapelt, obwohl horizontal
+  geblättert wird, und zeigten nichts, was der Inhalt nicht ohnehin sagt.
+  Mit ihnen fällt `--shell-gutter` weg — eine Kopplung an zwei unabhängig
+  justierbare Grid-Splits, die zweimal in Folge repariert werden musste.
+
+### Geändert
+
+- Der Wisch startet jetzt überall, auch über Buttons und Karten: Ein
+  horizontaler Zug blättert, ein Tipp löst weiterhin das getroffene Element
+  aus. Ausgenommen bleiben die Regler, die die horizontale Achse selbst
+  brauchen. Vorher blockierte jeder `button` die Geste — deshalb stand im
+  README wörtlich „swipe on a non-interactive part".
+- `setPointerCapture` auf der Stage entfällt. Pointer-Events blubbern ohnehin
+  hoch, und ein Capture auf dem Vorfahren leitet die Compat-Maus-Events um,
+  was Taps auf den jetzt wischbaren Buttons verschluckt hätte.
+
 ## [0.4.1] - 2026-07-19
 
 ### Behoben
@@ -137,7 +157,8 @@ Erste Version. Nie getaggt; entstanden zwischen dem 2026-04-08 und 2026-04-15.
   Abbruch bei abweichendem Bind.
 - `install-pi.sh` plus systemd-Units für Backend und Chromium-Kiosk.
 
-[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/phobo-at/pi-hub/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/phobo-at/pi-hub/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/phobo-at/pi-hub/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/phobo-at/pi-hub/compare/v0.3.0...v0.3.1

@@ -38,7 +38,7 @@ Wenn du eine Änderung planst, die diese Leitplanken verletzt, brauchst du eine 
 
 ## Aktueller UI-Maßstab
 
-Die UI hat zwei Screens, gewechselt per Wisch oder Seitenpunkt (rein client-seitig, beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf):
+Die UI hat zwei Screens, gewechselt per horizontalem Wisch (rein client-seitig, beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf). Es gibt **bewusst keine Seitenindikatoren**: Der Inhalt sagt eindeutig, auf welchem Screen man ist, und gestapelte Punkte widersprachen der horizontalen Wischrichtung. Nicht wieder einführen.
 
 **Screen 1 — Homescreen (Standard).** Die Zielhierarchie ist:
 

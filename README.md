@@ -17,7 +17,7 @@ Regenerate the screenshots with `bash scripts/take-screenshots.sh` (headless Chr
 
 ## Spotify Screen
 
-Swipe left on a non-interactive part of the home screen, or tap the second page dot, to open the full Spotify controller. It adds a large now-playing view, scrubbing, shared transport/volume controls, the next four queue items, and the existing device/playlist picker. Swipe right to return home. The queue is fetched only while this screen is visible; the screensaver always resets the UI to the home screen.
+Swipe left anywhere on the home screen to open the full Spotify controller — buttons and cards included, since a horizontal drag pages while a tap still activates whatever it landed on. The two sliders are the exception: they own the horizontal axis, so dragging one sets volume or position instead of paging. It adds a large now-playing view, scrubbing, shared transport/volume controls, the next four queue items, and the existing device/playlist picker. Swipe right to return home. There are deliberately no page indicators. The queue is fetched only while this screen is visible; the screensaver always resets the UI to the home screen.
 
 Release history lives in [CHANGELOG.md](CHANGELOG.md).
 

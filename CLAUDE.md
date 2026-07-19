@@ -37,7 +37,7 @@ When changing layout, typography, or any visible state, **also validate visually
 
 ## Architecture
 
-Single Flask process. The UI is server-rendered HTML + vanilla JS that polls `/api/state`. There is no SPA, no bundler, no client state framework. The UI has two screens (home dashboard, full Spotify controller) swapped client-side by swipe or page dot — both live in the same document, so it is still one page load with no router. Only the Spotify screen adds a second poll (`/api/spotify/queue`, 30 s), and only while it is visible.
+Single Flask process. The UI is server-rendered HTML + vanilla JS that polls `/api/state`. There is no SPA, no bundler, no client state framework. The UI has two screens (home dashboard, full Spotify controller) swapped client-side by a horizontal swipe — both live in the same document, so it is still one page load with no router. Only the Spotify screen adds a second poll (`/api/spotify/queue`, 30 s), and only while it is visible.
 
 **Data flow (one direction):**
 
