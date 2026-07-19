@@ -74,4 +74,11 @@ Env-var → config-key mapping lives in `_apply_env_overrides`. `CALENDAR_NAME` 
 
 ## Deployment shape
 
-The Pi runs two systemd units from `deploy/systemd/`: `smart-display.service` (the Waitress backend) and `smart-display-kiosk.service` (Chromium in `--kiosk --app=...` via `deploy/x11/kiosk-session.sh`). Anything that breaks unattended startup, idle behavior, or the screensaver fallback is a release blocker.
+The Pi runs two systemd units from `deploy/systemd/`: `smart-display.service` (the Waitress backend) and `smart-display-kiosk.service`. Anything that breaks unattended startup, idle behavior, or the screensaver fallback is a release blocker.
+
+The kiosk unit always execs `deploy/kiosk/start-kiosk.sh`, which dispatches on `KIOSK_BROWSER` from `/opt/smart-display/.kiosk.env` — **there are two mutually exclusive kiosk paths**:
+
+- `chromium` (the script's default) — Chromium in `--kiosk --app=...`, started through `xinit` with `deploy/x11/kiosk-session.sh` as the X session. Engine: Blink.
+- `cog` — Cog/WPE rendering straight to DRM/KMS, no X server at all. Engine: WebKit. `deploy/x11/kiosk-session.sh` is never executed on this path.
+
+**The live Pi runs `cog`** (`KIOSK_BROWSER=cog`), which `README.md` recommends for the Zero 2 W. Two consequences worth knowing before you touch either: edits to `deploy/x11/kiosk-session.sh` — Chromium flags included — have no effect on the current device, and browser-behaviour questions there must be judged against **WebKit**, not Chromium. Note that `scripts/take-screenshots.sh` and any local visual check run headless *Chrome*, so that validation does not cover the engine the device actually uses.
