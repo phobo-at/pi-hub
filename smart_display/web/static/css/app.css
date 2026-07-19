@@ -1,7 +1,9 @@
 :root {
-  /* Midpoint of the .dashboard-shell column gap, as a % of the stage width.
-     Base split is 0.9fr / 1.1fr with an 18px gap. The 1024x600 kiosk query
-     overrides it — retune both together or the page dots drift onto the hero. */
+  /* Midpoint of the visible screen's column gap, as a % of the stage width —
+     the page dots sit there. The two screens have DIFFERENT splits, and the
+     dots are absolutely positioned in the shared .screen-stage, so this has to
+     be re-declared per screen (see [data-active-screen]) or they land on a card
+     edge. Base value is the home screen's 0.9fr / 1.1fr with an 18px gap. */
   --shell-gutter: 45%;
   --bg: #0f1216;
   --bg-soft: #161b22;
@@ -1085,9 +1087,9 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
     gap: 12px;
   }
 
-  /* 1024x600 kiosk: 0.76 / (0.76 + 1.24) plus half the 12px gap. */
+  /* 1024x600 kiosk home screen: 0.76 / (0.76 + 1.24) plus half the 12px gap. */
   :root {
-    --shell-gutter: 38.6%;
+    --shell-gutter: 38.1%;
   }
 
   .hero-panel__inner {
@@ -1831,6 +1833,14 @@ body[data-watch-face="qlocktwo-ooe"] .forecast-chip:nth-child(n + 3) {
      the touch panel. touch-action ANDs down the ancestor chain, so a
      descendant cannot win panning back once we take it here. */
   touch-action: pan-y;
+}
+
+/* The Spotify screen splits 0.78fr / 1.22fr with a 12px gap — a different
+   gutter than the home screen, and unlike the home split it does not change
+   across breakpoints. Declared on the stage so it beats the :root value for
+   the dots nested inside; without it they sit on a card edge. */
+.screen-stage[data-active-screen="spotify"] {
+  --shell-gutter: 39.1%;
 }
 
 .display-screen {

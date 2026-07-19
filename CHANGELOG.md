@@ -11,6 +11,18 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-19
+
+### Behoben
+
+- Die Seitenpunkte saßen auf beiden Screens auf einer Kartenkante statt in der
+  Spaltenrinne. Ursache: Home (`0.76fr/1.24fr`) und Spotify-Screen
+  (`0.78fr/1.22fr`) haben unterschiedliche Aufteilungen, die Punkte hängen aber
+  absolut positioniert am gemeinsamen `.screen-stage` — ein einzelner Wert kann
+  nicht für beide stimmen. `--shell-gutter` wird jetzt über
+  `[data-active-screen]` pro Screen gesetzt (Home 38,1 %, Spotify 39,1 %);
+  gemessen sitzen beide exakt mittig in der 12px-Rinne.
+
 ## [0.4.0] - 2026-07-18
 
 ### Hinzugefügt
@@ -125,7 +137,8 @@ Erste Version. Nie getaggt; entstanden zwischen dem 2026-04-08 und 2026-04-15.
   Abbruch bei abweichendem Bind.
 - `install-pi.sh` plus systemd-Units für Backend und Chromium-Kiosk.
 
-[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/phobo-at/pi-hub/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/phobo-at/pi-hub/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/phobo-at/pi-hub/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/phobo-at/pi-hub/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/phobo-at/pi-hub/compare/v0.2.2...v0.3.0
