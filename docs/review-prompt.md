@@ -58,7 +58,8 @@ teils mehrfach revidiert worden.
 - CSRF/Trust-Modell: Reicht das Bind-Lockdown, oder gibt es Surfaces, die trotzdem härter sein sollten?
 
 ### 5. Frontend (`app.js`, `app.css`, `index.html`)
-- Polling-Intervall sauber aus `ui_config` (clamped `[5,30]`)?
+- Polling-Intervall sauber aus `ui_config` (`_poll_interval_seconds` in `routes.py`: `[3,4]s` bei aktivem Spotify, sonst `30s`)? Es ist bewusst vom Spotify-Upstream-Refresh (`refresh_intervals.spotify_seconds`) entkoppelt.
+- Läuft periodische Arbeit nur für den *sichtbaren* Screen (Fortschrittsbalken, analoger Sekundenzeiger, Queue-Poll)? Der versteckte Screen bleibt im DOM (`visibility: hidden`), seine Timer dürfen den Pi nicht wach halten.
 - DOM-Updates minimal-invasiv, keine Full-Re-Renders, die den Pi-GPU-Composite belasten?
 - LocalStorage-Keys dokumentiert (Hero-Clock-Watch-Face-Toggle)?
 - Watch-Face-Logik (flip/lcd/pulse/qlocktwo/qlocktwo-ooe/analog) deckungsgleich zwischen `watch_faces.py` und `app.js`? (QLOCKTWO-Grid, LCD-Segmente, Uhrzeiger-Winkel)
@@ -67,6 +68,8 @@ teils mehrfach revidiert worden.
 ### 6. UI-Hierarchie (Re-Litigation vermeiden)
 - Keine Wiedereinführung von: Status-Badges im `ok`-Zustand, „Startbildschirm"-Heading, separatem Wetter-Tile rechts, Timezone-Label unter dem Hero-Datum.
 - 1024×600 tatsächlich validiert, nicht nur Desktop-Viewport.
+- Zwei Screens (Homescreen + Spotify-Steuerung, Wisch oder Seitenpunkt): Beide liegen im selben Dokument — kein Router, kein zweiter Seitenaufruf, genau ein `<main>`. Der Screensaver setzt immer auf den Homescreen zurück.
+- Layout-Kopplungen: Ändert eine Sektion die Höhe einer anderen (z. B. `is-spotify-active` auf die Kalenderzeile), muss die betroffene Sektion neu vermessen werden — die Render-Dedup pro Sektion darf das nicht überspringen.
 
 ### 7. Persistenz & Cache
 - `DiskCache`: Atomic-Write-Pfad (tmp + rename), Fehlerpfade, Quarantäne bei Schema-Mismatch.
