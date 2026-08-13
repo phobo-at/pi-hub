@@ -35,6 +35,90 @@ def _make_store(temp_dir: str) -> StateStore:
 
 
 class StateStoreTest(unittest.TestCase):
+    def test_api_payload_is_cached_until_state_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = _make_store(temp_dir)
+
+            first_payload, first_etag = store.api_payload()
+            second_payload, second_etag = store.api_payload()
+
+            self.assertIs(first_payload, second_payload)
+            self.assertEqual(first_etag, second_etag)
+            self.assertEqual(json.loads(first_payload), store.to_dict())
+
+            store.update_section(
+                "spotify",
+                SpotifyState(
+                    snapshot=ProviderSnapshot(status="ok"),
+                    connected=True,
+                    track_title="Neuer Titel",
+                ),
+            )
+            changed_payload, changed_etag = store.api_payload()
+
+            self.assertIsNot(changed_payload, first_payload)
+            self.assertNotEqual(changed_etag, first_etag)
+            self.assertEqual(
+                json.loads(changed_payload)["spotify"]["track_title"],
+                "Neuer Titel",
+            )
+
+    def test_progress_only_spotify_updates_skip_sd_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = _make_store(temp_dir)
+            first = SpotifyState(
+                snapshot=ProviderSnapshot(
+                    status="ok",
+                    updated_at="2026-08-13T10:00:00+00:00",
+                ),
+                connected=True,
+                is_playing=True,
+                track_title="Langer Titel",
+                duration_ms=240_000,
+                progress_ms=1_000,
+            )
+            store.update_section("spotify", first)
+            disk_before = store.config.last_good_path.read_bytes()
+            _, etag_before = store.api_payload()
+
+            second = SpotifyState(
+                snapshot=ProviderSnapshot(
+                    status="ok",
+                    updated_at="2026-08-13T10:00:10+00:00",
+                ),
+                connected=True,
+                is_playing=True,
+                track_title="Langer Titel",
+                duration_ms=240_000,
+                progress_ms=11_000,
+            )
+            store.update_section("spotify", second)
+            api_payload, etag_after = store.api_payload()
+
+            self.assertEqual(store.config.last_good_path.read_bytes(), disk_before)
+            self.assertNotEqual(etag_after, etag_before)
+            self.assertEqual(json.loads(api_payload)["spotify"]["progress_ms"], 11_000)
+
+            changed_track = SpotifyState(
+                snapshot=ProviderSnapshot(
+                    status="ok",
+                    updated_at="2026-08-13T10:00:20+00:00",
+                ),
+                connected=True,
+                is_playing=True,
+                track_title="Nächster Titel",
+                duration_ms=180_000,
+                progress_ms=0,
+            )
+            store.update_section("spotify", changed_track)
+            disk_after_track_change = store.config.last_good_path.read_bytes()
+
+            self.assertNotEqual(disk_after_track_change, disk_before)
+            self.assertEqual(
+                json.loads(disk_after_track_change)["spotify"]["track_title"],
+                "Nächster Titel",
+            )
+
     def test_to_dict_returns_detached_payload(self) -> None:
         # to_dict() no longer round-trips through from_dict(), so the thing worth
         # pinning is the NESTED containers: a shared forecast/section list would

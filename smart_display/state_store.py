@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -36,6 +37,12 @@ class StateStore:
             "spotify": self._state.spotify.snapshot,
             "screensaver": ProviderSnapshot(status="empty", source="screensaver"),
         }
+        self._serialized_state = b""
+        self._state_etag = ""
+        self._refresh_serialized_locked()
+        self._persisted_spotify_key = self._spotify_persistence_key(
+            self._state.spotify
+        )
 
     def get_state(self) -> DashboardState:
         with self._lock:
@@ -49,14 +56,35 @@ class StateStore:
         with self._lock:
             return self._state.to_dict()
 
+    def to_dict_with_etag(self) -> tuple[dict[str, Any], str]:
+        """Return an atomic SSR snapshot and the matching API entity tag."""
+        with self._lock:
+            return self._state.to_dict(), self._state_etag
+
+    def api_payload(self) -> tuple[bytes, str]:
+        """Return immutable, pre-encoded state for the hot local poll route."""
+        with self._lock:
+            return self._serialized_state, self._state_etag
+
     def update_section(
         self, section_name: str, section: WeatherState | CalendarState | SpotifyState
     ) -> None:
         with self._lock:
+            persist = True
+            if section_name == "spotify" and isinstance(section, SpotifyState):
+                # progress_ms and the provider timestamp move on every Spotify
+                # tick, but neither makes the cold-boot fallback more useful.
+                # Keep publishing those values to /api/state while sparing the
+                # SD card an atomic rewrite every 10 seconds. Track, playback,
+                # volume, device, status and error changes still persist now.
+                persist = (
+                    self._spotify_persistence_key(section)
+                    != self._persisted_spotify_key
+                )
             setattr(self._state, section_name, section)
             self._state.system.generated_at = utcnow_iso()
             self._provider_health[section_name] = replace(section.snapshot)
-            self._persist_locked()
+            self._publish_locked(persist=persist)
 
     def mark_error(
         self,
@@ -120,7 +148,37 @@ class StateStore:
             }
 
     def _persist_locked(self) -> None:
-        self._cache.save(self._state.to_dict())
+        self._publish_locked(persist=True)
+
+    def _publish_locked(self, *, persist: bool) -> None:
+        self._refresh_serialized_locked()
+        if not persist:
+            return
+        self._cache.save_serialized(self._serialized_state)
+        self._persisted_spotify_key = self._spotify_persistence_key(
+            self._state.spotify
+        )
+
+    def _refresh_serialized_locked(self) -> None:
+        # /api/state is polled much more often than providers update. Encode on
+        # mutation, then serve the same immutable bytes until the next update.
+        # The digest is content-based rather than a process-local counter so a
+        # kiosk browser surviving a backend restart can never receive a false
+        # 304 because both processes happened to use the same revision number.
+        self._serialized_state = DiskCache.serialize(self._state.to_dict())
+        self._state_etag = hashlib.blake2s(
+            self._serialized_state,
+            digest_size=12,
+        ).hexdigest()
+
+    @staticmethod
+    def _spotify_persistence_key(spotify: SpotifyState) -> bytes:
+        payload = spotify.to_dict()
+        payload.pop("progress_ms", None)
+        snapshot = payload.get("snapshot")
+        if isinstance(snapshot, dict):
+            snapshot.pop("updated_at", None)
+        return DiskCache.serialize(payload)
 
     def _quarantine_cache(self) -> None:
         """Rename the on-disk cache aside so a bad payload can't poison

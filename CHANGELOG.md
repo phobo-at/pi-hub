@@ -11,6 +11,24 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+### Geändert
+
+- `/api/state` liefert unveränderte Polls per ETag als `304 Not Modified` ohne
+  JSON-Body. Der State wird nur noch bei Store-Änderungen serialisiert und
+  dieselben Bytes werden für API und `last_good.json` verwendet. Das spart auf
+  dem Pi wiederholte Python-Serialisierung sowie JSON-Parsing und Render-Key-
+  Berechnung im WPE-Browser; identische Spotify-Snapshots setzen außerdem die
+  lokal interpolierte Trackposition nicht länger zurück.
+- Reine Spotify-Fortschritts- und Provider-Zeitstempel-Updates bleiben live im
+  API-State, schreiben aber nicht länger alle zehn Sekunden `last_good.json`
+  neu. Materielle Änderungen an Track, Wiedergabe, Lautstärke, Gerät oder
+  Fehlerstatus werden weiterhin sofort atomar persistiert.
+- Die LCD-/Pulse-Doppelpunkte laufen über einen gemeinsamen diskreten
+  Sekundentakt statt über kontinuierliche CSS-Fades. Der Homescreen-
+  Fortschrittsbalken bewegt sich ebenfalls in Sekundenschritten statt den
+  Compositor dauerhaft zwischen Updates arbeiten zu lassen. Der Uhr-Takt ruht
+  auf dem Spotify-Screen; im Screensaver ruhen Uhr- und Fortschritts-Timer.
+
 ## [0.8.0] - 2026-07-19
 
 ### Geändert

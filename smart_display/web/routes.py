@@ -45,7 +45,7 @@ def create_blueprint() -> Blueprint:
     def index():
         services = current_app.extensions["smart_display"]
         config = services["config"]
-        state = services["state_store"].to_dict()
+        state, state_etag = services["state_store"].to_dict_with_etag()
         # Plan B14: render the hero clock on the server so the cold-reload
         # first frame is correct. JS overwrites these values on its first tick.
         clock_factory = services.get("clock_factory", format_initial_clock)
@@ -78,6 +78,7 @@ def create_blueprint() -> Blueprint:
                 "image_duration_seconds": config.screensaver.image_duration_seconds,
                 "poll_interval_seconds": _poll_interval_seconds(config),
                 "watch_face": config.app.watch_face,
+                "state_etag": state_etag,
             },
             initial_state=state,
             initial_clock=initial_clock,
@@ -94,7 +95,20 @@ def create_blueprint() -> Blueprint:
     @blueprint.get("/api/state")
     def api_state():
         services = current_app.extensions["smart_display"]
-        return jsonify(services["state_store"].to_dict())
+        payload, etag = services["state_store"].api_payload()
+        if request.if_none_match.contains(etag):
+            response = current_app.response_class(status=304)
+        else:
+            response = current_app.response_class(
+                payload,
+                mimetype="application/json",
+            )
+        response.set_etag(etag)
+        # The browser may retain the local response but must validate it. Its
+        # explicit If-None-Match header makes this work consistently in both
+        # Blink and the Pi's WPE WebKit engine.
+        response.cache_control.no_cache = True
+        return response
 
     @blueprint.get("/api/screensaver/next")
     def next_screensaver_image():

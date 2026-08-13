@@ -2,6 +2,7 @@
   const boot = window.__SMART_DISPLAY__ || {};
   const config = boot.config || {};
   let state = boot.state || {};
+  let stateEtag = typeof config.state_etag === "string" ? config.state_etag : "";
   let screensaverActive = false;
   let idleTimer = null;
   let pollTimer = null;
@@ -21,6 +22,9 @@
   // than a phone flick, and 800 ms rejected careful gestures outright.
   const SWIPE_MAX_MS = 1500;
   const SWIPE_AXIS_RATIO = 1.3;
+  const REDUCED_MOTION = Boolean(
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
   const lastRenderedSectionKeys = {
     weather: "",
     calendar: "",
@@ -380,7 +384,7 @@
   }
 
   let lastAnalogKey = "";
-  let analogSecondTimer = null;
+  let faceSecondTimer = null;
 
   function updateAnalog(force) {
     if (!nodes.analogHour || !nodes.analogMinute || !nodes.analogSecond) {
@@ -415,24 +419,43 @@
     nodes.analogMinute.setAttribute("transform", `rotate(${minuteDeg} 100 100)`);
   }
 
-  function startAnalogSecondTick() {
-    if (analogSecondTimer !== null) {
+  function updateFaceSecondTick() {
+    const face = document.body.getAttribute("data-watch-face") || "flip";
+    if (face === "analog") {
+      updateAnalog(false);
       return;
     }
-    // Align the first tick to the next second boundary so the hand steps
-    // in sync with real-world seconds rather than drifting off by up to 1 s.
-    const msUntilNextSecond = 1000 - (Date.now() % 1000);
-    analogSecondTimer = window.setTimeout(function tick() {
-      updateAnalog(false);
-      analogSecondTimer = window.setTimeout(tick, 1000);
-    }, msUntilNextSecond + 10);
+    const dim = Math.floor(Date.now() / 1000) % 2 === 1;
+    if (face === "lcd" && nodes.lcdColon) {
+      nodes.lcdColon.classList.toggle("is-dim", dim);
+    } else if (face === "pulse" && nodes.pulseColon) {
+      nodes.pulseColon.classList.toggle("is-dim", dim);
+    }
   }
 
-  function stopAnalogSecondTick() {
-    if (analogSecondTimer !== null) {
-      window.clearTimeout(analogSecondTimer);
-      analogSecondTimer = null;
+  function startFaceSecondTick() {
+    if (faceSecondTimer !== null) {
+      return;
     }
+    // One discrete update per second replaces LCD/Pulse CSS fades that the
+    // browser otherwise samples throughout their duration. Re-align every time
+    // instead of accumulating callback drift over weeks of kiosk uptime.
+    const tick = () => {
+      updateFaceSecondTick();
+      const delay = 1000 - (Date.now() % 1000) + 10;
+      faceSecondTimer = window.setTimeout(tick, delay);
+    };
+    const delay = 1000 - (Date.now() % 1000) + 10;
+    faceSecondTimer = window.setTimeout(tick, delay);
+  }
+
+  function stopFaceSecondTick() {
+    if (faceSecondTimer !== null) {
+      window.clearTimeout(faceSecondTimer);
+      faceSecondTimer = null;
+    }
+    if (nodes.lcdColon) nodes.lcdColon.classList.remove("is-dim");
+    if (nodes.pulseColon) nodes.pulseColon.classList.remove("is-dim");
   }
 
   function currentWatchFace() {
@@ -600,24 +623,34 @@
     // currently visible so a background face doesn't keep the CPU warm.
     if (next === "qlocktwo") {
       updateQlocktwo(true);
-      stopAnalogSecondTick();
+      stopFaceSecondTick();
     } else if (next === "qlocktwo-ooe") {
       updateQlocktwoOoe(true);
-      stopAnalogSecondTick();
+      stopFaceSecondTick();
     } else if (next === "analog") {
       updateAnalog(true);
-      startAnalogSecondTick();
+      startFaceSecondTick();
     } else if (next === "flip") {
       updateFlip(true);
-      stopAnalogSecondTick();
+      stopFaceSecondTick();
     } else if (next === "lcd") {
       updateLcd(true);
-      stopAnalogSecondTick();
+      if (REDUCED_MOTION) {
+        stopFaceSecondTick();
+      } else {
+        updateFaceSecondTick();
+        startFaceSecondTick();
+      }
     } else if (next === "pulse") {
       updatePulse(true);
-      stopAnalogSecondTick();
+      if (REDUCED_MOTION) {
+        stopFaceSecondTick();
+      } else {
+        updateFaceSecondTick();
+        startFaceSecondTick();
+      }
     } else {
-      stopAnalogSecondTick();
+      stopFaceSecondTick();
     }
     return next;
   }
@@ -652,6 +685,7 @@
       m2: document.getElementById("flip-m2"),
     },
     lcdFace: document.getElementById("watch-face-lcd"),
+    lcdColon: document.querySelector(".lcd-colon"),
     lcdGroups: {
       h1: document.getElementById("lcd-h1"),
       h2: document.getElementById("lcd-h2"),
@@ -659,6 +693,7 @@
       m2: document.getElementById("lcd-m2"),
     },
     pulseFace: document.getElementById("watch-face-pulse"),
+    pulseColon: document.querySelector(".pulse-clock__colon"),
     pulseHh: document.getElementById("pulse-hh"),
     pulseMm: document.getElementById("pulse-mm"),
     screensaverFlipCards: {
@@ -1545,11 +1580,22 @@
 
   async function fetchState() {
     try {
-      const response = await fetch("/api/state", { cache: "no-store" });
+      const headers = stateEtag ? { "If-None-Match": stateEtag } : {};
+      const response = await fetch("/api/state", {
+        cache: "no-store",
+        headers,
+      });
+      if (response.status === 304) {
+        return;
+      }
       if (!response.ok) {
         return;
       }
       const payload = await response.json();
+      const nextEtag = response.headers.get("ETag");
+      if (nextEtag) {
+        stateEtag = nextEtag;
+      }
       render(payload);
     } catch (error) {
       window.console.debug("state refresh failed", error);
@@ -1732,10 +1778,10 @@
     });
 
     if (target === "spotify") {
-      // The home face is hidden but still in the DOM, so its second-hand timer
+      // The home face is hidden but still in the DOM, so its second-tick timer
       // would keep waking the Pi behind an invisible screen — same reasoning as
-      // applyWatchFace and showScreensaver.
-      stopAnalogSecondTick();
+      // applyWatchFace and the screensaver path.
+      stopFaceSecondTick();
       startQueueRefresh();
     } else {
       stopQueueRefresh();
@@ -2230,7 +2276,7 @@
     screensaverActive = true;
     setActiveScreen("home", { animate: false });
     stopProgressTimer();
-    stopAnalogSecondTick();
+    stopFaceSecondTick();
     closeSpotifyPicker();
     nodes.screensaver.classList.add("is-active");
     nodes.screensaver.setAttribute("aria-hidden", "false");

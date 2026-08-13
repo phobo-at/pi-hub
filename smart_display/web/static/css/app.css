@@ -338,19 +338,17 @@ body[data-watch-face="analog"] .watch-face__analog {
   filter: drop-shadow(0 0 6px rgba(255, 178, 91, 0.4));
 }
 
+.lcd-colon {
+  opacity: 1;
+}
+
 .lcd-colon circle {
   fill: #ffb25b;
   filter: drop-shadow(0 0 6px rgba(255, 178, 91, 0.4));
-  animation: lcd-colon-blink 1.2s ease-in-out infinite;
 }
 
-@keyframes lcd-colon-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lcd-colon circle { animation: none; }
+.lcd-colon.is-dim {
+  opacity: 0.35;
 }
 
 /* --- Pulse / minimal digital --------------------------------------------- */
@@ -376,16 +374,11 @@ body[data-watch-face="analog"] .watch-face__analog {
 
 .pulse-clock__colon {
   display: inline-block;
-  animation: pulse-colon-blink 1.1s ease-in-out infinite;
+  opacity: 1;
 }
 
-@keyframes pulse-colon-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pulse-clock__colon { animation: none; }
+.pulse-clock__colon.is-dim {
+  opacity: 0.25;
 }
 
 .watch-face__qlocktwo,
@@ -953,7 +946,6 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   background: var(--accent-strong);
   transform: scaleX(0);
   transform-origin: left center;
-  transition: transform 1s linear;
 }
 
 /* Idle: no cover, so the fallback gradient shows. A centred label with a
@@ -1026,12 +1018,6 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spotify-tile__progress-fill {
-    transition: none;
-  }
 }
 
 .spotify-actions {
@@ -1885,6 +1871,9 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  /* Isolate the fixed-size screens so the 1 Hz clock/progress writes cannot
+     invalidate layout or paint in the inactive sibling subtree. */
+  contain: layout paint;
   transition:
     opacity 200ms ease,
     transform 200ms ease,
