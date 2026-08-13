@@ -28,11 +28,13 @@ def create_app(
     _configure_logging(app_config)
     app_config.app.data_dir.mkdir(parents=True, exist_ok=True)
     app_config.screensaver_cache_dir.mkdir(parents=True, exist_ok=True)
+    app_config.screensaver_local_dir.mkdir(parents=True, exist_ok=True)
 
     state_store = StateStore(app_config)
     image_cache = ImageCache(
         cache_dir=app_config.screensaver_cache_dir,
         manifest_path=app_config.screensaver_manifest_path,
+        local_dir=app_config.screensaver_local_dir,
         demo_dir=app_config.root_dir / "smart_display" / "web" / "static" / "images" / "demo-screensaver",
     )
 

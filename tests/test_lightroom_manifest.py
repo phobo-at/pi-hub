@@ -493,6 +493,60 @@ class DemoEntriesCacheTest(unittest.TestCase):
         self.assertEqual(cache.demo_entries(), [])
 
 
+class LocalEntriesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.local_dir = self.tmp / "screensaver-local"
+        self.local_dir.mkdir()
+        (self.local_dir / "family.jpg").write_bytes(SAMPLE_PNG)
+
+    def _make_cache(self) -> ImageCache:
+        return ImageCache(
+            cache_dir=self.tmp / "screensaver",
+            manifest_path=self.tmp / "screensaver" / "manifest.json",
+            local_dir=self.local_dir,
+            downloader=lambda url, timeout: (SAMPLE_PNG, {}),
+        )
+
+    def test_local_photos_join_remote_rotation(self) -> None:
+        cache = self._make_cache()
+        cache.sync_remote_images(["https://example.com/remote.jpg"], timeout_seconds=5)
+
+        self.assertEqual(cache.count(), 1)
+        self.assertEqual(cache.available_count(), 2)
+        self.assertEqual(
+            {entry.source_url for entry in cache.available_entries()},
+            {"https://example.com/remote.jpg", "local:family.jpg"},
+        )
+
+    def test_local_photos_replace_demo_fallback(self) -> None:
+        demo_dir = self.tmp / "demo"
+        demo_dir.mkdir()
+        (demo_dir / "demo.jpg").write_bytes(SAMPLE_PNG)
+        cache = ImageCache(
+            cache_dir=self.tmp / "screensaver",
+            manifest_path=self.tmp / "screensaver" / "manifest.json",
+            local_dir=self.local_dir,
+            demo_dir=demo_dir,
+            downloader=lambda url, timeout: (SAMPLE_PNG, {}),
+        )
+
+        self.assertEqual(cache.available_count(), 1)
+        self.assertEqual(cache.next_entry().source_url, "local:family.jpg")
+
+    def test_local_lookup_rejects_unknown_and_nested_paths(self) -> None:
+        cache = self._make_cache()
+
+        self.assertEqual(
+            cache.local_entry_for_filename("family.jpg").public_path,
+            "/media/screensaver-local/family.jpg",
+        )
+        self.assertIsNone(cache.local_entry_for_filename("../family.jpg"))
+        self.assertIsNone(cache.local_entry_for_filename("missing.jpg"))
+
+
 class FailuresWriteOnChangeTest(unittest.TestCase):
     """``failed.json`` is persisted on every ``sync_remote_images`` call,
     but in the happy path (all URLs already cached, nothing failed) there

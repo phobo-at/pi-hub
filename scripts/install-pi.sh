@@ -166,7 +166,7 @@ fi
 
 echo "=== 5/7  Datenverzeichnis ==="
 DATA_DIR="$INSTALL_DIR/data"
-mkdir -p "$DATA_DIR/screensaver"
+mkdir -p "$DATA_DIR/screensaver" "$DATA_DIR/screensaver-local"
 chown -R "$SERVICE_USER":"$SERVICE_GROUP" "$DATA_DIR"
 echo "  $DATA_DIR bereit"
 

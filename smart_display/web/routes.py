@@ -238,4 +238,12 @@ def create_blueprint() -> Blueprint:
             return jsonify({"error": "not found"}), 404
         return send_file(Path(entry.local_path))
 
+    @blueprint.get("/media/screensaver-local/<path:filename>")
+    def local_screensaver_media(filename: str):
+        services = current_app.extensions["smart_display"]
+        entry = services["image_cache"].local_entry_for_filename(filename)
+        if entry is None:
+            return jsonify({"error": "not found"}), 404
+        return send_file(Path(entry.local_path))
+
     return blueprint

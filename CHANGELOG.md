@@ -11,6 +11,12 @@ Commit einzeln aufzuführen.
 
 ## [Unreleased]
 
+### Hinzugefügt
+
+- Dauerhafte lokale Screensaver-Fotos aus `data/screensaver-local/` werden
+  gemeinsam mit dem Lightroom-Cache angezeigt. Lightroom-Abgleiche und
+  Deployments lassen diese nutzereigenen Dateien unangetastet.
+
 ### Geändert
 
 - `/api/state` liefert unveränderte Polls per ETag als `304 Not Modified` ohne
