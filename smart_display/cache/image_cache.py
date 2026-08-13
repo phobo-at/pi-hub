@@ -53,6 +53,7 @@ class ImageCache:
         *,
         display_size: tuple[int, int] = (1024, 600),
         downloader: Callable[[str, int], DownloadResult] | None = None,
+        remote_enabled: bool = True,
         local_dir: str | Path | None = None,
         demo_dir: str | Path | None = None,
         http_client: HttpClient | None = None,
@@ -60,6 +61,7 @@ class ImageCache:
     ):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.remote_enabled = remote_enabled
         self.local_dir = Path(local_dir) if local_dir else None
         self.demo_dir = Path(demo_dir) if demo_dir else None
         self.manifest_cache = DiskCache(manifest_path)
@@ -83,6 +85,9 @@ class ImageCache:
         # every 15 seconds on the Pi.
         self._local_entries_cache: list[PhotoManifestEntry] | None = None
         self._local_entries_mtime: float | None = None
+        self._selection_queue: list[PhotoManifestEntry] = []
+        self._selection_signature: tuple[str, ...] = ()
+        self._last_selection_path: str | None = None
         # Plan C2: caching the demo-entries list avoids re-walking the demo
         # directory every slideshow tick (≤15 s on the Pi). Invalidate via
         # manifest mtime so edits still land on the next call.
@@ -98,7 +103,7 @@ class ImageCache:
     def available_entries(
         self, *, include_demo: bool = True
     ) -> list[PhotoManifestEntry]:
-        entries = self._entries + self.local_entries()
+        entries = (self._entries if self.remote_enabled else []) + self.local_entries()
         if not entries and include_demo:
             entries = self.demo_entries()
         return list(entries)
@@ -181,8 +186,33 @@ class ImageCache:
     def next_entry(self, *, include_demo: bool = True) -> PhotoManifestEntry | None:
         pool = self.available_entries(include_demo=include_demo)
         if not pool:
+            self._selection_queue = []
+            self._selection_signature = ()
             return None
-        return self._random.choice(pool)
+
+        signature = tuple(entry.public_path for entry in pool)
+        if signature != self._selection_signature or not self._selection_queue:
+            self._selection_queue = list(pool)
+            self._random.shuffle(self._selection_queue)
+            self._selection_signature = signature
+
+            # Every photo appears once per shuffled round. At the boundary
+            # between rounds, avoid placing the previous final photo first
+            # again; otherwise the screen can look frozen for 30 seconds.
+            if len(self._selection_queue) > 1:
+                next_index = len(self._selection_queue) - 1
+                if (
+                    self._selection_queue[next_index].public_path
+                    == self._last_selection_path
+                ):
+                    self._selection_queue[0], self._selection_queue[next_index] = (
+                        self._selection_queue[next_index],
+                        self._selection_queue[0],
+                    )
+
+        selected = self._selection_queue.pop()
+        self._last_selection_path = selected.public_path
+        return selected
 
     def local_entries(self) -> list[PhotoManifestEntry]:
         entries, mtime = self._static_entries(

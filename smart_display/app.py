@@ -34,6 +34,7 @@ def create_app(
     image_cache = ImageCache(
         cache_dir=app_config.screensaver_cache_dir,
         manifest_path=app_config.screensaver_manifest_path,
+        remote_enabled=bool(app_config.screensaver.source_url.strip()),
         local_dir=app_config.screensaver_local_dir,
         demo_dir=app_config.root_dir / "smart_display" / "web" / "static" / "images" / "demo-screensaver",
     )

@@ -114,11 +114,13 @@ class LightroomSourceProvider(BaseProvider):
             return
 
         if not self.config.screensaver.source_url:
+            local_photo_count = len(self.image_cache.local_entries())
             self.state_store.set_provider_snapshot(
                 self.section_name,
-                self.snapshot(
-                    status="empty",
-                    error_message="Keine Lightroom-Quelle konfiguriert.",
+                self.snapshot(status="ok", source="local")
+                if local_photo_count
+                else self.snapshot(
+                    status="empty", error_message="Keine Bildquelle konfiguriert."
                 ),
             )
             self.state_store.set_screensaver_photo_count(available_photo_count())

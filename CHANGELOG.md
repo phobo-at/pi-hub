@@ -16,6 +16,9 @@ Commit einzeln aufzuführen.
 - Dauerhafte lokale Screensaver-Fotos aus `data/screensaver-local/` werden
   gemeinsam mit dem Lightroom-Cache angezeigt. Lightroom-Abgleiche und
   Deployments lassen diese nutzereigenen Dateien unangetastet.
+- Die Screensaver-Auswahl mischt alle verfügbaren Fotos rundenweise. Jedes Bild
+  erscheint genau einmal, bevor neu gemischt wird; direkte Wiederholungen sind
+  auch am Übergang zwischen zwei Runden ausgeschlossen.
 
 ### Geändert
 
