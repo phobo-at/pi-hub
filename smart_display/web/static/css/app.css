@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("../fonts/atkinson-hyperlegible-next-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+
 :root {
   --bg: #0f1216;
   --bg-soft: #161b22;
@@ -22,11 +30,8 @@
   box-sizing: border-box;
 }
 
-/* Form controls do not inherit the document font — a <button> falls back to the
-   UA control font, which on the Pi resolves to a family that ships Regular and
-   Bold only. Every weight below 700 would snap back to bold inside buttons,
-   which is the whole problem the Inter switch exists to fix. Set it once here
-   rather than re-declaring the stack per button rule. */
+/* Form controls do not inherit the document font. Keep buttons and pickers on
+   the same locally bundled UI face instead of the Pi's UA control fallback. */
 button,
 input,
 select,
@@ -46,13 +51,10 @@ body {
     radial-gradient(circle at bottom right, rgba(173, 142, 109, 0.14), transparent 28%),
     linear-gradient(145deg, #0b0e12 0%, #11161d 45%, #171d24 100%);
   color: var(--text);
-  /* Inter (apt: fonts-inter) over Noto Sans Display for two reasons on this
-     panel: it ships real Medium/SemiBold cuts, and Noto Sans Display ships only
-     Regular and Bold — so every `font-weight: 600` here used to render as 700,
-     which is why the UI read as uniformly heavy. Second, its larger x-height and
-     open apertures survive the low pixel density at 1–2 m better than a display
-     face does. Noto stays as the fallback and still covers glyphs Inter lacks. */
-  font-family: "Inter", "Noto Sans Display", "Noto Sans", sans-serif;
+  /* The bundled face keeps every kiosk identical and is designed around clear,
+     distinct glyphs and open counters. Inter remains installed on the Pi for
+     the QLOCKTWO face; Noto covers any glyphs Atkinson does not contain. */
+  font-family: "Atkinson Hyperlegible Next", "Noto Sans", sans-serif;
   touch-action: manipulation;
 }
 
@@ -134,6 +136,9 @@ body {
   cursor: pointer;
   display: block;
   width: 100%;
+  /* Clock faces are display typography, not interface copy. Their metrics and
+     digit shapes are already tuned for this panel, so keep them on Inter. */
+  font-family: "Inter", "Noto Sans", sans-serif;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -801,8 +806,7 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   color: var(--accent);
   font-size: 18px;
   font-weight: 600;
-  /* Tabular figures so the times form a clean column instead of shifting with
-     each digit's width — Inter's proportional 1 is markedly narrower. */
+  /* Tabular figures keep the time column stable as its digits change. */
   font-variant-numeric: tabular-nums;
   /* "09:00–10:30" must stay on one line: a wrapped time cell makes rows
      different heights, and renderCalendar's row budget assumes they are equal. */
@@ -1336,11 +1340,10 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
     padding-top: 0;
   }
 
-  /* 104px is the floor for the time cell: "09:00–10:30" measures ~99px at
-     16px/600 with tabular figures — Inter's tabular cut is wider than its
-     proportional one, so those two changes push in opposite directions. Too
-     narrow and the text paints outside its track rather than wrapping (nowrap),
-     silently eating the gap to the title. */
+  /* 104px is the floor for the time cell: "09:00–10:30" measures ~97px in the
+     bundled font at 16px/600 with tabular figures. Too narrow and the text
+     paints outside its track rather than wrapping (nowrap), silently eating the
+     gap to the title. */
   .calendar-item,
   .calendar-empty {
     grid-template-columns: 104px 1fr;
@@ -1488,6 +1491,8 @@ body[data-watch-face="qlocktwo-ooe"] .hero-weather__forecast {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Same flip face and digit geometry as the interactive clock. */
+  font-family: "Inter", "Noto Sans", sans-serif;
 }
 
 .flip-clock--screensaver {
